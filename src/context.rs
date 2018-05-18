@@ -1206,6 +1206,7 @@ pub const LOCAL_BLOCK_MASK: usize = (1 << SUPERBLOCK_TO_BLOCK_SHIFT) - 1;
 
 /// Absolute offset in superblocks inside a plane, where a superblock is defined
 /// to be an N*N square where N = (1 << SUPERBLOCK_TO_PLANE_SHIFT).
+#[derive(Clone)]
 pub struct SuperBlockOffset {
     pub x: usize,
     pub y: usize
@@ -1231,6 +1232,7 @@ impl SuperBlockOffset {
 
 /// Absolute offset in blocks inside a plane, where a block is defined
 /// to be an N*N square where N = (1 << BLOCK_TO_PLANE_SHIFT).
+#[derive(Clone)]
 pub struct BlockOffset {
     pub x: usize,
     pub y: usize
@@ -1526,13 +1528,14 @@ impl BlockContext {
         for k in 0..txb_w_unit {
             let sign = self.above_coeff_context[plane][bo.x + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
-            dc_sign += signs[sign as usize] as i16;
+            dc_sign += signs[sign as usize] as i16; 
         }
+
 
         for k in 0..txb_h_unit {
             let sign = self.left_coeff_context[plane][bo.y_in_sb() + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
-            dc_sign += signs[sign as usize] as i16;
+            dc_sign += signs[sign as usize] as i16; 
         }
 
         txb_ctx.dc_sign_ctx = dc_sign_contexts[(dc_sign + 2 * MAX_TX_SIZE_UNIT as i16) as usize];
@@ -2097,8 +2100,7 @@ impl ContextWriter {
             if level == 0 { continue; }
 
             if c == 0 {
-                symbol!(self, sign, &mut self.fc.dc_sign_cdf[plane_type]
-                              [txb_ctx.dc_sign_ctx], 2);
+                symbol!(self, sign, &mut self.fc.dc_sign_cdf[plane_type][txb_ctx.dc_sign_ctx], 2);
             } else {
                 self.w.bit(sign as u16);
             }

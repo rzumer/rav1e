@@ -86,7 +86,6 @@ impl od_ec_enc {
         let u: u32;
         let v: u32;
         assert!(32768 <= r);
-
         assert!(fh <= fl);
         assert!(fl <= 32768);
         let n = nsyms - 1;
@@ -299,6 +298,7 @@ impl Writer {
             });
         }
         self.cdf(s, &cdf[..nsymbs]);
+
         Writer::update_cdf(cdf, s, nsymbs);
     }
     pub fn bit(&mut self, bit: u16) {
