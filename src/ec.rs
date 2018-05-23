@@ -10,6 +10,8 @@
 
 #![allow(non_camel_case_types)]
 
+use context::*;
+
 pub const OD_BITRES: u8 = 3;
 const EC_PROB_SHIFT: u32 = 6;
 const EC_MIN_PROB: u32 = 4;
@@ -86,6 +88,9 @@ impl od_ec_enc {
         let u: u32;
         let v: u32;
         assert!(32768 <= r);
+
+        if can_log() { println!("RNG: {}", r); }
+
         assert!(fh <= fl);
         assert!(fl <= 32768);
         let n = nsyms - 1;
@@ -266,7 +271,7 @@ impl Writer {
         let mut tmp = 32768;
 
         // Single loop (faster)
-        for i in 0..(nsymbs - 1) {
+        for i in 0..(nsymbs) {
           tmp = if i as u32 == val { 0 } else { tmp };
           if tmp < cdf[i] {
             cdf[i] -= (cdf[i] - tmp) >> rate;
@@ -298,6 +303,22 @@ impl Writer {
             });
         }
         self.cdf(s, &cdf[..nsymbs]);
+
+        if can_log() {
+            print!("CDF: ");
+
+            for i in 0..nsymbs {
+                print!("{};", cdf[i]);
+            }
+
+            print!("({}) - ", cdf[nsymbs]);
+
+            println!("s: {}, size: {}", s, nsymbs);
+
+            if cdf[0] == 20888 { // known nyan.y4m CDF desync point
+                //panic!();
+            }
+        }
 
         Writer::update_cdf(cdf, s, nsymbs);
     }

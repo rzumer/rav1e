@@ -12,7 +12,7 @@ pub enum PartitionType {
 
 pub const BLOCK_SIZES_ALL: usize = 19;
 
-#[derive(Copy,Clone,PartialEq,PartialOrd)]
+#[derive(Copy,Clone,PartialEq,PartialOrd,Debug)]
 pub enum BlockSize {
     BLOCK_4X4,
     BLOCK_4X8,

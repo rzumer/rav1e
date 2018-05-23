@@ -12,6 +12,14 @@ use partition::TxType::*;
 use partition::PredictionMode::*;
 use plane::*;
 
+// TODO KEEP THIS OUT OF HERE
+pub static mut WRITEME: bool = true;
+pub fn can_log() -> bool {
+  unsafe {
+    return WRITEME;
+  }
+}
+
 const PLANES: usize = 3;
 
 const PARTITION_PLOFFSET: usize = 4;
@@ -1524,21 +1532,27 @@ impl BlockContext {
         let txb_w_unit = tx_size_wide_unit[tx_size as usize];
         let txb_h_unit = tx_size_high_unit[tx_size as usize];
 
+        if can_log() { print!("above_coeff_context: "); }
         // Decide txb_ctx.dc_sign_ctx
         for k in 0..txb_w_unit {
             let sign = self.above_coeff_context[plane][bo.x + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
             dc_sign += signs[sign as usize] as i16; 
+            if can_log() { print!("{};", self.above_coeff_context[plane][bo.x + k]); }
         }
 
+        if can_log() { print!("\nleft_coeff_context: "); }
 
         for k in 0..txb_h_unit {
             let sign = self.left_coeff_context[plane][bo.y_in_sb() + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
             dc_sign += signs[sign as usize] as i16; 
+            if can_log() { print!("{};", self.left_coeff_context[plane][bo.y_in_sb() + k]); }
         }
 
         txb_ctx.dc_sign_ctx = dc_sign_contexts[(dc_sign + 2 * MAX_TX_SIZE_UNIT as i16) as usize];
+
+        if can_log() { println!("\ndc_sign: {}; dc_sign_ctx: {}", dc_sign, txb_ctx.dc_sign_ctx); }
 
         // Decide txb_ctx.txb_skip_ctx
         if plane == 0 {
@@ -2100,6 +2114,16 @@ impl ContextWriter {
             if level == 0 { continue; }
 
             if c == 0 {
+                /*if can_log() && plane_type == 1 && txb_ctx.dc_sign_ctx == 0 {
+                  print!("**********************plane_type={}, sign_ctx={} / ", plane_type, txb_ctx.dc_sign_ctx);
+                
+                  for i in self.fc.dc_sign_cdf[plane_type][txb_ctx.dc_sign_ctx].iter() {
+                    print!("{};", i);
+                  }
+
+                  println!("********************");
+                }*/
+
                 symbol!(self, sign, &mut self.fc.dc_sign_cdf[plane_type][txb_ctx.dc_sign_ctx], 2);
             } else {
                 self.w.bit(sign as u16);

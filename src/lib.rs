@@ -620,7 +620,7 @@ fn rdo_mode_decision(fi: &FrameInvariants, fs: &mut FrameState,
 
     for &mode in RAV1E_INTRA_MODES {
         if fi.frame_type == FrameType::KEY && mode >= PredictionMode::NEARESTMV {
-          break;
+            break;
         }
 
         let checkpoint = cw.checkpoint();
@@ -655,8 +655,10 @@ fn rdo_mode_decision(fi: &FrameInvariants, fs: &mut FrameState,
 fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                   cw: &mut ContextWriter,
                   bsize: BlockSize, bo: &BlockOffset, cached_block: &RDOOutput) -> RDOOutput {
-    let max_rd = std::u64::MAX as f64;
+    unsafe { WRITEME = false; }
 
+    let max_rd = std::u64::MAX as f64;
+    
     let q = dc_q(fi.qindex) as f64;
     let q0 = q / 8.0_f64;   // Convert q into Q0 precision, given thatn libaom quantizers are Q3.
 
@@ -688,16 +690,16 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                     continue;
                 }
 
-                if cached_block.part_modes.len() > 0 {
+                /*if cached_block.part_modes.len() > 0 {
                     let mode = cached_block.part_modes[0].clone();
                     rd = mode.rd_cost as f64;
                     child_modes.push(mode);
                 }
-                else {
+                else {*/
                     let output = rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone();
                     rd = output.rd_cost as f64;
                     child_modes.push(output);
-                }
+                //}
             },
             PartitionType::PARTITION_SPLIT => {
                 let subsize = get_subsize(bsize, partition);
@@ -778,14 +780,14 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
             _ => { assert!(false); },
         }
 
-        if rd == max_rd {
+        //if rd == max_rd {
             let po = bo.plane_offset(&fs.input.planes[0].cfg);
             let d = sse_wxh(&fs.input.planes[0].slice(&po), &fs.rec.planes[0].slice(&po),
                             w as usize, h as usize);
             let r = ((cw.w.tell_frac() - tell) as f64)/8.0;
 
             rd = (d as f64) + lambda * r;
-        }
+        //}
         
         if rd < best_rd {
             best_rd = rd;
@@ -797,6 +799,8 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
     }
 
     assert!(best_rd as i64 >= 0);
+
+    unsafe { WRITEME = true; }
     
     let rdo_output = RDOOutput { rd_cost: best_rd as u64,
                                 part_type: best_partition,
@@ -847,15 +851,19 @@ fn encode_partition(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextW
 
     match partition {
         PartitionType::PARTITION_NONE => {
-            let pred_mode = if rdo_output.part_modes.len() > 0 { 
-                rdo_output.part_modes[0].pred_mode
+            let mode_decision = if rdo_output.part_modes.len() > 0 { 
+                rdo_output.part_modes[0].clone()
             } else { // edges
-                rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].pred_mode };
+                rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone()
+            };
 
-            cw.bc.set_mode(bo, bsize, pred_mode);
+            cw.bc.set_mode(bo, bsize, mode_decision.pred_mode);
+
+            if can_log() { println!("Encoding block: {:?} at ({},{}), cost: {}",
+                bsize, bo.x, bo.y, mode_decision.rd_cost); /*if mode_decision.rd_cost > 10000 { panic!(); }*/ }
 
             // FIXME every final block is encoded twice, once for RDO decision and once here
-            encode_block(fi, fs, cw, pred_mode, bsize, bo);
+            encode_block(fi, fs, cw, mode_decision.pred_mode, bsize, bo);
         },
         PartitionType::PARTITION_SPLIT => {
             if rdo_output.part_modes.len() >= 4 {
