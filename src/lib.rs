@@ -613,7 +613,7 @@ fn rdo_mode_decision(fi: &FrameInvariants, fs: &mut FrameState,
     let lambda = q0*q0*2.0_f64.log2()/6.0;	// Use Q0 quantizer since lambda will be applied to Q0 pixel domain
 
     let mut best_mode = PredictionMode::DC_PRED;
-    let mut best_rd = std::f64::MAX;
+    let mut best_rd = std::u64::MAX as f64;
     let tell = cw.w.tell_frac();
     let w = block_size_wide[bsize as usize];
     let h = block_size_high[bsize as usize];
@@ -655,7 +655,7 @@ fn rdo_mode_decision(fi: &FrameInvariants, fs: &mut FrameState,
 fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                   cw: &mut ContextWriter,
                   bsize: BlockSize, bo: &BlockOffset, cached_block: &RDOOutput) -> RDOOutput {
-    let max_rd = std::f64::MAX;
+    let max_rd = std::u64::MAX as f64;
 
     let q = dc_q(fi.qindex) as f64;
     let q0 = q / 8.0_f64;   // Convert q into Q0 precision, given thatn libaom quantizers are Q3.
@@ -664,7 +664,7 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
     let lambda = q0*q0*2.0_f64.log2()/6.0;  // Use Q0 quantizer since lambda will be applied to Q0 pixel domain
 
     let mut best_partition = cached_block.part_type;
-    let mut best_rd = cached_block.rd_cost as f64; // Set cached_block.rd_cost = std::f64::MAX for no bias/initial rdo
+    let mut best_rd = cached_block.rd_cost as f64; // Set cached_block.rd_cost = std::u64::MAX for no bias/initial rdo
     let mut best_pred_modes = cached_block.part_modes.clone();
 
     let tell = cw.w.tell_frac();
@@ -708,8 +708,10 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
 
                 let bs = mi_size_wide[bsize as usize];
                 let hbs = bs >> 1; // Half the block size in blocks
-                let subw = w >> 1;
-                let subh = h >> 1;
+
+                // FIXME RD calculation for each block of a split partition is incorrect
+                //let subw = w >> 1;
+                //let subh = h >> 1;
 
                 // FIXME Each block is encoded twice here (for mode decision and for partitioning decision)
                 // Mode decision should be more tightly integrated with partitioning decision so that only
@@ -719,14 +721,14 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                 cw.bc.set_mode(&offset, subsize, mode);
                 encode_block(fi, fs, cw, mode, subsize, &offset);
 
-                let po = offset.plane_offset(&fs.input.planes[0].cfg);
+                /*let po = offset.plane_offset(&fs.input.planes[0].cfg);
                 let d = sse_wxh(&fs.input.planes[0].slice(&po), &fs.rec.planes[0].slice(&po),
                                 subw as usize, subh as usize);
                 let r = ((cw.w.tell_frac() - tell) as f64)/8.0;
                 let sub_rd = (d as f64) + lambda * r;
                 rd = sub_rd;
 
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });
+                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });*/
 
 
                 let offset = BlockOffset{x: bo.x + hbs as usize, y: bo.y};
@@ -734,14 +736,14 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                 cw.bc.set_mode(&offset, subsize, mode);
                 encode_block(fi, fs, cw, mode, subsize, &offset);
 
-                let po = offset.plane_offset(&fs.input.planes[0].cfg);
+                /*let po = offset.plane_offset(&fs.input.planes[0].cfg);
                 let d = sse_wxh(&fs.input.planes[0].slice(&po), &fs.rec.planes[0].slice(&po),
                                 subw as usize, subh as usize);
                 let r = ((cw.w.tell_frac() - tell) as f64)/8.0;
                 let sub_rd = (d as f64) + lambda * r - rd;
                 rd += sub_rd;
 
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });
+                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });*/
 
 
                 let offset = BlockOffset{x: bo.x, y: bo.y + hbs as usize};
@@ -749,14 +751,14 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                 cw.bc.set_mode(&offset, subsize, mode);
                 encode_block(fi, fs, cw, mode, subsize, &offset);
 
-                let po = offset.plane_offset(&fs.input.planes[0].cfg);
+                /*let po = offset.plane_offset(&fs.input.planes[0].cfg);
                 let d = sse_wxh(&fs.input.planes[0].slice(&po), &fs.rec.planes[0].slice(&po),
                                 subw as usize, subh as usize);
                 let r = ((cw.w.tell_frac() - tell) as f64)/8.0;
                 let sub_rd = (d as f64) + lambda * r - rd;
                 rd += sub_rd;
 
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });
+                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });*/
 
 
                 let offset = BlockOffset{x: bo.x + hbs as usize, y: bo.y + hbs as usize};
@@ -764,14 +766,14 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                 cw.bc.set_mode(&offset, subsize, mode);
                 encode_block(fi, fs, cw, mode, subsize, &offset);
 
-                let po = offset.plane_offset(&fs.input.planes[0].cfg);
+                /*let po = offset.plane_offset(&fs.input.planes[0].cfg);
                 let d = sse_wxh(&fs.input.planes[0].slice(&po), &fs.rec.planes[0].slice(&po),
                                 subw as usize, subh as usize);
                 let r = ((cw.w.tell_frac() - tell) as f64)/8.0;
                 let sub_rd = (d as f64) + lambda * r - rd;
                 rd += sub_rd;
 
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });
+                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode, rd_cost: sub_rd as u64 });*/
             },
             _ => { assert!(false); },
         }
