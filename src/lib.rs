@@ -551,7 +551,7 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
     for p in 0..1 {
         for by in 0..bh {
             for bx in 0..bw {
-                let tx_bo = BlockOffset{x: bo.x + bx*tx_size.width_mi(), y: bo.y + by*tx_size.height_mi()};
+                let tx_bo = BlockOffset { x: bo.x + bx * tx_size.width_mi(), y: bo.y + by * tx_size.height_mi() };
                 let po = tx_bo.plane_offset(&fs.input.planes[p].cfg);
                 encode_tx_block(fi, fs, cw, p, &tx_bo, mode, tx_size, tx_type, bsize, &po, skip);
             }
@@ -564,8 +564,8 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
         BlockSize::BLOCK_32X32 => TxSize::TX_16X16,
         _ => TxSize::TX_32X32
     };
-    let mut bw_uv = bw*tx_size.width_mi() >> xdec;
-    let mut bh_uv = bh*tx_size.height_mi() >> ydec;
+    let mut bw_uv = bw * tx_size.width_mi() >> xdec;
+    let mut bh_uv = bh * tx_size.height_mi() >> ydec;
 
     if (bw_uv == 0 || bh_uv == 0) && has_chroma(bo, bsize, xdec, ydec) {
         bw_uv = 1;
@@ -588,19 +588,25 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
             for by in 0..bh_uv {
                 for bx in 0..bw_uv {
                     let tx_bo =
-                        BlockOffset{x: bo.x + (bx*uv_tx_size.width_mi() << xdec) - ((bw*tx_size.width_mi() == 1) as usize),
-                                    y: bo.y + (by*uv_tx_size.height_mi() << ydec) - ((bh*tx_size.height_mi() == 1) as usize)};
+                        BlockOffset {
+                            x: bo.x + (bx * uv_tx_size.width_mi() << xdec) - ((bw * tx_size.width_mi() == 1) as usize),
+                            y: bo.y + (by * uv_tx_size.height_mi() << ydec) - ((bh * tx_size.height_mi() == 1) as usize)
+                        };
                     let po = PlaneOffset {
-                        x: sb_offset.x + partition_x + bx*uv_tx_size.width(),
-                        y: sb_offset.y + partition_y + by*uv_tx_size.height()};
+                        x: sb_offset.x + partition_x + bx * uv_tx_size.width(),
+                        y: sb_offset.y + partition_y + by * uv_tx_size.height()
+                    };
 
                     encode_tx_block(fi, fs, cw, p, &tx_bo, uv_mode, uv_tx_size, uv_tx_type, plane_bsize, &po, skip);
                 }
             }
         }
     }
-}
 
+    if can_log() {
+        println!("{:?} at ({},{})", bsize, bo.x, bo.y);
+    }
+}
 // RDO-based mode decision
 fn rdo_mode_decision(fi: &FrameInvariants, fs: &mut FrameState,
                   cw: &mut ContextWriter,
@@ -658,7 +664,7 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
     unsafe { WRITEME = false; }
 
     let max_rd = std::u64::MAX as f64;
-    
+
     let q = dc_q(fi.qindex) as f64;
     let q0 = q / 8.0_f64;   // Convert q into Q0 precision, given thatn libaom quantizers are Q3.
 
@@ -690,16 +696,16 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                     continue;
                 }
 
-                /*if cached_block.part_modes.len() > 0 {
+                if cached_block.part_modes.len() > 0 {
                     let mode = cached_block.part_modes[0].clone();
                     rd = mode.rd_cost as f64;
                     child_modes.push(mode);
                 }
-                else {*/
+                else {
                     let output = rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone();
                     rd = output.rd_cost as f64;
                     child_modes.push(output);
-                //}
+                }
             },
             PartitionType::PARTITION_SPLIT => {
                 let subsize = get_subsize(bsize, partition);
@@ -780,15 +786,15 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
             _ => { assert!(false); },
         }
 
-        //if rd == max_rd {
+        if rd == max_rd {
             let po = bo.plane_offset(&fs.input.planes[0].cfg);
             let d = sse_wxh(&fs.input.planes[0].slice(&po), &fs.rec.planes[0].slice(&po),
                             w as usize, h as usize);
             let r = ((cw.w.tell_frac() - tell) as f64)/8.0;
 
             rd = (d as f64) + lambda * r;
-        //}
-        
+        }
+
         if rd < best_rd {
             best_rd = rd;
             best_partition = partition;
@@ -801,7 +807,7 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
     assert!(best_rd as i64 >= 0);
 
     unsafe { WRITEME = true; }
-    
+
     let rdo_output = RDOOutput { rd_cost: best_rd as u64,
                                 part_type: best_partition,
                                 part_modes: best_pred_modes };
@@ -828,7 +834,7 @@ fn encode_partition(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextW
     if is_sb_on_frame_border && bsize > BlockSize::BLOCK_4X4 {
         // SBs on right or bottom frame borders split down to BLOCK_4X4.
         partition = PartitionType::PARTITION_SPLIT;
-    } else if bsize >= BlockSize::BLOCK_16X16 { // 8x8 max to avoid desyncs
+    } else if bsize >= BlockSize::BLOCK_32X32 {
         partition = PartitionType::PARTITION_SPLIT;
     } else if bsize >= BlockSize::BLOCK_8X8 {
         rdo_output = rdo_partition_decision(fi, fs, cw, bsize, bo, &rdo_output);
@@ -851,25 +857,24 @@ fn encode_partition(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextW
 
     match partition {
         PartitionType::PARTITION_NONE => {
-            let mode_decision = if rdo_output.part_modes.len() > 0 { 
+            unsafe { WRITEME = false; }
+            let mode_decision = if rdo_output.part_modes.len() > 0 {
                 rdo_output.part_modes[0].clone()
             } else { // edges
                 rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone()
             };
+            unsafe { WRITEME = true; }
 
             cw.bc.set_mode(bo, bsize, mode_decision.pred_mode);
-
-            if can_log() { println!("Encoding block: {:?} at ({},{}), cost: {}",
-                bsize, bo.x, bo.y, mode_decision.rd_cost); /*if mode_decision.rd_cost > 10000 { panic!(); }*/ }
 
             // FIXME every final block is encoded twice, once for RDO decision and once here
             encode_block(fi, fs, cw, mode_decision.pred_mode, bsize, bo);
         },
         PartitionType::PARTITION_SPLIT => {
-            if rdo_output.part_modes.len() >= 4 {
-                // Assume a partition encoded in a decision (so we know the right modes)
-                assert!(subsize != BlockSize::BLOCK_INVALID);
+            assert!(subsize != BlockSize::BLOCK_INVALID);
 
+            /*if rdo_output.part_modes.len() >= 4 {
+                // Assume a partition encoded in a decision (so we know the right modes)
                 for mode in rdo_output.part_modes {
                     let offset = mode.bo.clone();
 
@@ -880,17 +885,17 @@ fn encode_partition(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextW
                             part_modes: vec![mode] }));
                 }
             }
-            else {
+            else {*/
                 encode_partition(fi, fs, cw, subsize, bo, &None);
                 encode_partition(fi, fs, cw, subsize, &BlockOffset{x: bo.x + hbs as usize, y: bo.y}, &None);
                 encode_partition(fi, fs, cw, subsize, &BlockOffset{x: bo.x, y: bo.y + hbs as usize}, &None);
                 encode_partition(fi, fs, cw, subsize, &BlockOffset{x: bo.x + hbs as usize, y: bo.y + hbs as usize}, &None);
-            }
+            //}
         },
         _ => { assert!(false); },
     }
 
-    if bsize >= BlockSize::BLOCK_8X8 && 
+    if bsize >= BlockSize::BLOCK_8X8 &&
         (bsize == BlockSize::BLOCK_8X8 || partition != PartitionType::PARTITION_SPLIT) {
             cw.bc.update_partition_context(bo, subsize, bsize);
     }

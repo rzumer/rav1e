@@ -1,7 +1,7 @@
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
 
-#[derive(Copy,Clone,PartialEq,PartialOrd)]
+#[derive(Copy,Clone,PartialEq,PartialOrd,Debug)]
 pub enum PartitionType {
     PARTITION_NONE,
     PARTITION_HORZ,

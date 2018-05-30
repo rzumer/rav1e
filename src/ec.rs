@@ -89,7 +89,7 @@ impl od_ec_enc {
         let v: u32;
         assert!(32768 <= r);
 
-        if can_log() { println!("RNG: {}", r); }
+        if can_log_detailed(2) { println!("RNG: {}", r); }
 
         assert!(fh <= fl);
         assert!(fl <= 32768);
@@ -304,7 +304,7 @@ impl Writer {
         }
         self.cdf(s, &cdf[..nsymbs]);
 
-        if can_log() {
+        if can_log_detailed(2) {
             print!("CDF: ");
 
             for i in 0..nsymbs {

@@ -12,12 +12,15 @@ use partition::TxType::*;
 use partition::PredictionMode::*;
 use plane::*;
 
-// TODO KEEP THIS OUT OF HERE
 pub static mut WRITEME: bool = true;
+pub static WRITEDETAIL: u8 = 1;
+
 pub fn can_log() -> bool {
-  unsafe {
-    return WRITEME;
-  }
+  unsafe { return WRITEME; }
+}
+
+pub fn can_log_detailed(level: u8) -> bool {
+    unsafe { return WRITEME && WRITEDETAIL >= level; }
 }
 
 const PLANES: usize = 3;
@@ -792,9 +795,9 @@ static av1_nz_map_ctx_offset_32x64: [i8; 1024] = [
   21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
   21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
   21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
-  21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 
-  21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 
-  21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 
+  21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
+  21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
+  21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
   21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
   21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
   21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21,
@@ -1306,6 +1309,7 @@ pub struct BlockContext {
     left_partition_context: [u8; MAX_MIB_SIZE],
     above_coeff_context: [Vec<u8>; PLANES],
     left_coeff_context: [[u8; MAX_MIB_SIZE]; PLANES],
+    left_tx_context: [u8; MAX_TX_SIZE],
     blocks: Vec<Vec<Block>>
 }
 
@@ -1323,6 +1327,7 @@ impl BlockContext {
                                   vec![0; cols << (MI_SIZE_LOG2 - tx_size_wide_log2[0])],
                                   vec![0; cols << (MI_SIZE_LOG2 - tx_size_wide_log2[0])],],
             left_coeff_context: [[0; MAX_MIB_SIZE]; PLANES],
+            left_tx_context: [0; MAX_TX_SIZE],
             blocks: vec![vec![Block::default(); cols]; rows]
         }
     }
@@ -1384,7 +1389,12 @@ impl BlockContext {
             *c = 0;
         }
     }
-    //TODO(anyone): Add reset_left_tx_context() here then call it in reset_left_contexts()
+
+    pub fn reset_left_tx_context(&mut self) {
+        for c in self.left_tx_context.iter_mut() {
+            *c = 0;
+        }
+    }
 
     pub fn reset_skip_context(&mut self, bo: &BlockOffset,
                           bsize: BlockSize, xdec: usize, ydec: usize) {
@@ -1420,7 +1430,7 @@ impl BlockContext {
         }
         BlockContext::reset_left_partition_context(self);
 
-        //TODO(anyone): Call reset_left_tx_context() here.
+        BlockContext::reset_left_tx_context(self);
     }
 
     pub fn set_mode(&mut self, bo: &BlockOffset, bsize: BlockSize, mode: PredictionMode) {
@@ -1443,6 +1453,11 @@ impl BlockContext {
         // TODO: this should be way simpler without sub8x8
         let above_ctx = self.above_partition_context[bo.x];
         let left_ctx = self.left_partition_context[bo.y_in_sb()];
+
+        if can_log_detailed(1) {
+            //println!("above_ctx: {} / left_ctx: {}", above_ctx, left_ctx);
+        }
+
         let bsl = b_width_log2_lookup[bsize as usize] - b_width_log2_lookup[BlockSize::BLOCK_8X8 as usize];
         let above = (above_ctx >> bsl) & 1;
         let left = (left_ctx >> bsl) & 1;
@@ -1464,13 +1479,21 @@ impl BlockContext {
         // update the partition context at the end notes. set partition bits
         // of block sizes larger than the current one to be one, and partition
         // bits of smaller block sizes to be zero.
+        if can_log_detailed(1) { print!("above_ctx: "); }
+
         for i in 0..bw {
             above_ctx[i as usize] = partition_context_lookup[subsize as usize][0];
+            if can_log_detailed(1) { print!("{};", above_ctx[i as usize]); }
         }
+
+        if can_log_detailed(1) { print!(" / left_ctx: "); }
 
         for i in 0..bh {
             left_ctx[i as usize] = partition_context_lookup[subsize as usize][1];
+            if can_log_detailed(1) { print!("{};", left_ctx[i as usize]); }
         }
+
+        if can_log_detailed(1) { println!(""); }
     }
 
     fn skip_context(&mut self, bo: &BlockOffset) -> usize {
@@ -1522,6 +1545,7 @@ impl BlockContext {
                        plane: usize, bo: &BlockOffset) -> TXB_CTX {
         let mut txb_ctx = TXB_CTX { txb_skip_ctx: 0,
                                 dc_sign_ctx: 0 };
+        let log_ctx = can_log_detailed(1);
         const MAX_TX_SIZE_UNIT: usize = 16;
         const signs: [i8; 3] = [ 0, -1, 1 ];
         const dc_sign_contexts: [usize; 4 * MAX_TX_SIZE_UNIT + 1] = [
@@ -1532,27 +1556,30 @@ impl BlockContext {
         let txb_w_unit = tx_size_wide_unit[tx_size as usize];
         let txb_h_unit = tx_size_high_unit[tx_size as usize];
 
-        if can_log() { print!("above_coeff_context: "); }
+        if log_ctx { print!("above_coeff_context: "); }
         // Decide txb_ctx.dc_sign_ctx
         for k in 0..txb_w_unit {
             let sign = self.above_coeff_context[plane][bo.x + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
-            dc_sign += signs[sign as usize] as i16; 
-            if can_log() { print!("{};", self.above_coeff_context[plane][bo.x + k]); }
+            dc_sign += signs[sign as usize] as i16;
+
+            if log_ctx { print!("{};", self.above_coeff_context[plane][bo.x + k]); }
         }
 
-        if can_log() { print!("\nleft_coeff_context: "); }
+        if log_ctx { print!(" / left_coeff_context: "); }
 
         for k in 0..txb_h_unit {
             let sign = self.left_coeff_context[plane][bo.y_in_sb() + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
-            dc_sign += signs[sign as usize] as i16; 
-            if can_log() { print!("{};", self.left_coeff_context[plane][bo.y_in_sb() + k]); }
+            dc_sign += signs[sign as usize] as i16;
+
+            if log_ctx { print!("{};", self.left_coeff_context[plane][bo.y_in_sb() + k]); }
         }
 
-        txb_ctx.dc_sign_ctx = dc_sign_contexts[(dc_sign + 2 * MAX_TX_SIZE_UNIT as i16) as usize];
+        if log_ctx { println!(""); }
 
-        if can_log() { println!("\ndc_sign: {}; dc_sign_ctx: {}", dc_sign, txb_ctx.dc_sign_ctx); }
+        txb_ctx.dc_sign_ctx = dc_sign_contexts[(dc_sign + 2 * MAX_TX_SIZE_UNIT as i16) as usize];
+        if can_log_detailed(2) { println!("dc_sign: {}; dc_sign_ctx: {}", dc_sign, txb_ctx.dc_sign_ctx); }
 
         // Decide txb_ctx.txb_skip_ctx
         if plane == 0 {
@@ -1698,6 +1725,8 @@ impl ContextWriter {
         let ctx = self.bc.partition_plane_context(&bo, bsize);
         assert!(ctx < PARTITION_CONTEXTS);
         let partition_cdf = &mut self.fc.partition_cdf[ctx];
+
+        if can_log() { println!("{:?}", p); }
 
         if !has_rows && !has_cols {
           return;
@@ -2114,9 +2143,9 @@ impl ContextWriter {
             if level == 0 { continue; }
 
             if c == 0 {
-                /*if can_log() && plane_type == 1 && txb_ctx.dc_sign_ctx == 0 {
+                /*if can_log_detailed() && plane_type == 1 && txb_ctx.dc_sign_ctx == 0 {
                   print!("**********************plane_type={}, sign_ctx={} / ", plane_type, txb_ctx.dc_sign_ctx);
-                
+
                   for i in self.fc.dc_sign_cdf[plane_type][txb_ctx.dc_sign_ctx].iter() {
                     print!("{};", i);
                   }
