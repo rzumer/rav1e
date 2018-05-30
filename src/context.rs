@@ -13,7 +13,7 @@ use partition::PredictionMode::*;
 use plane::*;
 
 pub static mut WRITEME: bool = true;
-pub static WRITEDETAIL: u8 = 1;
+pub static mut WRITEDETAIL: u8 = 1;
 
 pub fn can_log() -> bool {
   unsafe { return WRITEME; }
@@ -1556,24 +1556,24 @@ impl BlockContext {
         let txb_w_unit = tx_size_wide_unit[tx_size as usize];
         let txb_h_unit = tx_size_high_unit[tx_size as usize];
 
-        if log_ctx { print!("above_coeff_context: "); }
+        if log_ctx { print!("{} - above_coeff_context: {}", plane, self.above_coeff_context[plane][bo.x]); }
         // Decide txb_ctx.dc_sign_ctx
         for k in 0..txb_w_unit {
             let sign = self.above_coeff_context[plane][bo.x + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
             dc_sign += signs[sign as usize] as i16;
 
-            if log_ctx { print!("{};", self.above_coeff_context[plane][bo.x + k]); }
+            //if log_ctx { print!("{};", self.above_coeff_context[plane][bo.x + k]); }
         }
 
-        if log_ctx { print!(" / left_coeff_context: "); }
+        if log_ctx { print!(" / left_coeff_context: {}", self.left_coeff_context[plane][bo.y_in_sb()]); }
 
         for k in 0..txb_h_unit {
             let sign = self.left_coeff_context[plane][bo.y_in_sb() + k] >> COEFF_CONTEXT_BITS;
             assert!(sign <= 2);
             dc_sign += signs[sign as usize] as i16;
 
-            if log_ctx { print!("{};", self.left_coeff_context[plane][bo.y_in_sb() + k]); }
+            //if log_ctx { print!("{};", self.left_coeff_context[plane][bo.y_in_sb() + k]); }
         }
 
         if log_ctx { println!(""); }
