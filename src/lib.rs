@@ -657,6 +657,18 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
                   bsize: BlockSize, bo: &BlockOffset, cached_block: &RDOOutput) -> RDOOutput {
     let max_rd = std::f64::MAX;
 
+    let q = dc_q(fi.qindex) as f64;
+    let q0 = q / 8.0_f64;	// Convert q into Q0 precision, given thatn libaom quantizers are Q3.
+
+    // Lambda formula from doc/theoretical_results.lyx in the daala repo
+    let lambda = q0*q0*2.0_f64.log2()/6.0;	// Use Q0 quantizer since lambda will be applied to Q0 pixel domain
+
+    let mut best_mode = PredictionMode::DC_PRED;
+    let mut best_rd = std::f64::MAX;
+    let tell = cw.w.tell_frac();
+    let w = block_size_wide[bsize as usize];
+    let h = block_size_high[bsize as usize];
+
     let mut best_partition = cached_block.part_type;
     let mut best_rd = cached_block.rd_cost; // Set cached_block.rd_cost = std::f64::MAX for no bias/initial rdo
     let mut best_pred_modes = cached_block.part_modes.clone();
@@ -680,7 +692,10 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
 
                 let mode_decision = cached_block.part_modes.get(0)
                     .unwrap_or(&rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0]).clone();
-                child_modes.push(mode_decision);
+                child_modes.push(mode_decision.clone());
+
+                cw.bc.set_mode(&bo, bsize, mode_decision.pred_mode);
+                encode_block(fi, fs, cw, mode_decision.pred_mode, bsize, &bo);
             },
             PartitionType::PARTITION_SPLIT => {
                 let subsize = get_subsize(bsize, partition);
@@ -694,24 +709,46 @@ fn rdo_partition_decision(fi: &FrameInvariants, fs: &mut FrameState,
 
                 let offset = BlockOffset{x: bo.x, y: bo.y};
                 let mode_decision = rdo_mode_decision(fi, fs, cw, subsize, &offset).part_modes[0].clone();
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode_decision.pred_mode, rd_cost: mode_decision.rd_cost });
+                cw.bc.set_mode(&offset, subsize, mode_decision.pred_mode);
+                encode_block(fi, fs, cw, mode_decision.pred_mode, subsize, &offset);
+                child_modes.push(mode_decision);
 
                 let offset = BlockOffset{x: bo.x + hbs as usize, y: bo.y};
                 let mode_decision = rdo_mode_decision(fi, fs, cw, subsize, &offset).part_modes[0].clone();
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode_decision.pred_mode, rd_cost: mode_decision.rd_cost });
+                cw.bc.set_mode(&offset, subsize, mode_decision.pred_mode);
+                encode_block(fi, fs, cw, mode_decision.pred_mode, subsize, &offset);
+                child_modes.push(mode_decision);
 
                 let offset = BlockOffset{x: bo.x, y: bo.y + hbs as usize};
                 let mode_decision = rdo_mode_decision(fi, fs, cw, subsize, &offset).part_modes[0].clone();
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode_decision.pred_mode, rd_cost: mode_decision.rd_cost });
+                cw.bc.set_mode(&offset, subsize, mode_decision.pred_mode);
+                encode_block(fi, fs, cw, mode_decision.pred_mode, subsize, &offset);
+                child_modes.push(mode_decision);
 
                 let offset = BlockOffset{x: bo.x + hbs as usize, y: bo.y + hbs as usize};
                 let mode_decision = rdo_mode_decision(fi, fs, cw, subsize, &offset).part_modes[0].clone();
-                child_modes.push(RDOPartitionOutput { bo: offset.clone(), pred_mode: mode_decision.pred_mode, rd_cost: mode_decision.rd_cost });
+                cw.bc.set_mode(&offset, subsize, mode_decision.pred_mode);
+                encode_block(fi, fs, cw, mode_decision.pred_mode, subsize, &offset);
+                child_modes.push(mode_decision);
             },
             _ => { assert!(false); },
         }
 
         rd = child_modes.iter().map(|m| m.rd_cost).sum::<f64>();
+
+        let po = bo.plane_offset(&fs.input.planes[0].cfg);
+        let d = sse_wxh(&fs.input.planes[0].slice(&po), &fs.rec.planes[0].slice(&po),
+                        w as usize, h as usize);
+        let r = ((cw.w.tell_frac() - tell) as f64)/8.0;
+
+        let true_rd = (d as f64) + lambda*r;
+
+        //if partition == PartitionType::PARTITION_SPLIT {
+            println!("{} vs. {}", rd, true_rd);
+            if rd != true_rd {
+                panic!();
+            }
+        //}
 
         if rd < best_rd {
             best _rd = rd;
