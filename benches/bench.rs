@@ -237,10 +237,10 @@ fn setup_pred(ra: &mut ChaChaRng) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
 
 fn setup_pred_nn(ra: &mut ChaChaRng) -> (Vec<f32>, ml::NeuralNetworkConfig, Vec<f32>) {
     let mut weights =
-        [[0_f32; ml::NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER]; ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+        [[0_f32; ml::NeuralNetworkConfig::MAX_WEIGHTS_PER_LAYER]; ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
 
     for i in 0..ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1 {
-        for j in 0..ml::NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER {
+        for j in 0..ml::NeuralNetworkConfig::MAX_WEIGHTS_PER_LAYER {
             weights[i][j] = ra.gen();
         }
     }

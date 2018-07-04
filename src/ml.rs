@@ -15,14 +15,14 @@ pub struct NeuralNetworkConfig {
     pub num_outputs: usize,
     pub num_hidden_layers: usize,
     pub num_hidden_nodes: [usize; NeuralNetworkConfig::MAX_HIDDEN_LAYERS],
-    pub weights: [[f32; NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
+    pub weights: [[f32; NeuralNetworkConfig::MAX_WEIGHTS_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
     pub bias: [[f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1]
 }
 
 impl NeuralNetworkConfig {
     pub const MAX_HIDDEN_LAYERS: usize = 10;
     pub const MAX_NODES_PER_LAYER: usize = 128;
-    pub const MAX_CONNECTIONS_PER_LAYER: usize = Self::MAX_NODES_PER_LAYER * Self::MAX_NODES_PER_LAYER;
+    pub const MAX_WEIGHTS_PER_LAYER: usize = (Self::MAX_NODES_PER_LAYER - 1) * (Self::MAX_NODES_PER_LAYER - 1);
 }
 
 pub fn nn_predict(input: &Vec<f32>, nn_config: &NeuralNetworkConfig, output: &mut Vec<f32>) {
@@ -42,6 +42,8 @@ pub fn nn_predict(input: &Vec<f32>, nn_config: &NeuralNetworkConfig, output: &mu
     for layer in 0..num_layers {
         let bias = nn_config.bias[layer];
         let num_output_nodes = nn_config.num_hidden_nodes[layer] as usize;
+
+        // Bias is counted as one node towards the maximum
         assert!(num_output_nodes < NeuralNetworkConfig::MAX_NODES_PER_LAYER);
 
         for node_out in 0_usize..num_output_nodes {
@@ -157,7 +159,7 @@ pub mod test {
         let (input, mut o1, mut o2) = setup_pred(ra);
 
         let mut weights =
-            [[0_f32; NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+            [[0_f32; NeuralNetworkConfig::MAX_WEIGHTS_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
         let mut bias =
             [[0_f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
 
