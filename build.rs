@@ -14,17 +14,13 @@ use std::fs;
 fn main() {
     let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let build_path = Path::new(&cargo_dir).join("aom_build/aom");
-    let debug = if let Some(v) = env::var("PROFILE").ok() {
-        match v.as_str() {
-            "bench" | "release" => "0",
-            _ => "1",
-        }
-    } else {
-        "0"
-    };
 
     let dst = cmake::Config::new(build_path)
-        .define("CONFIG_DEBUG", debug)
+        .define("CONFIG_AV1_ENCODER", "0")
+        .define("CONFIG_DEBUG", "1")
+        .define("CONFIG_EXPERIMENTAL", "1")
+        .define("CONFIG_UNIT_TESTS", "0")
+        .define("CONFIG_EXT_PARTITION", "0")
         .define("CONFIG_EXT_PARTITION_TYPES", "0")
         .define("CONFIG_INTRA_EDGE2", "0")
         .define("CONFIG_OBU", "1")
@@ -94,4 +90,13 @@ fn main() {
 
         rerun_dir("aom_build");
     }
+
+    cc::Build::new()
+        .file("aom_build/aom/aom_dsp/fwd_txfm.c")
+        .file("aom_build/aom/av1/encoder/dct.c")
+        .file("aom_build/aom/av1/encoder/ml.c")
+        .include("aom_build")
+        .include("aom_build/aom")
+        .flag("-std=c99")
+        .compile("libntr.a");
 }
