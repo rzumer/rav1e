@@ -89,6 +89,7 @@ fn main() {
     cc::Build::new()
         .file("aom_build/aom/aom_dsp/fwd_txfm.c")
         .file("aom_build/aom/av1/encoder/dct.c")
+        .file("aom_build/aom/av1/encoder/ml.c")
         .include("aom_build")
         .include("aom_build/aom")
         .flag("-std=c99")

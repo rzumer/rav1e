@@ -26,15 +26,16 @@ use std::io::prelude::*;
 use bitstream_io::{BE, LE, BitWriter};
 use clap::{App, Arg};
 
-// for benchmarking purpose
+// Declare all modules
+pub mod context;
 pub mod ec;
+pub mod ml;
 pub mod partition;
 pub mod plane;
-pub mod context;
-pub mod transform;
-pub mod quantize;
 pub mod predict;
+pub mod quantize;
 pub mod rdo;
+pub mod transform;
 
 use context::*;
 use partition::*;
