@@ -8,28 +8,6 @@
 // Media Patent License 1.0 was not distributed with this source code in the
 // PATENTS file, you can obtain it at www.aomedia.org/license/patent.
 
-use libc;
-use std;
-
-#[repr(C)]
-struct NN_CONFIG {
-    num_inputs: libc::c_int,         // Number of input nodes, i.e. features.
-    num_outputs: libc::c_int,        // Number of output nodes.
-    num_hidden_layers: libc::c_int,  // Number of hidden layers, maximum 10.
-    // Number of nodes for each hidden layer.
-    num_hidden_nodes: [libc::c_int; NeuralNetworkConfig::MAX_HIDDEN_LAYERS],
-    // Weight parameters, indexed by layer.
-    weights: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
-    // Bias parameters, indexed by layer.
-    bias: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1]
-}
-
-extern {
-    #[cfg(test)]
-    fn av1_nn_predict(features: *const libc::c_float, nn_config: *const NN_CONFIG,
-                      output: *mut libc::c_float);
-}
-
 /// Neural network configuration
 #[derive(Clone)]
 pub struct NeuralNetworkConfig {
@@ -37,16 +15,17 @@ pub struct NeuralNetworkConfig {
     pub num_outputs: usize,
     pub num_hidden_layers: usize,
     pub num_hidden_nodes: [usize; NeuralNetworkConfig::MAX_HIDDEN_LAYERS],
-    pub weights: [[f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
+    pub weights: [[f32; NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
     pub bias: [[f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1]
 }
 
 impl NeuralNetworkConfig {
     pub const MAX_HIDDEN_LAYERS: usize = 10;
     pub const MAX_NODES_PER_LAYER: usize = 128;
+    pub const MAX_CONNECTIONS_PER_LAYER: usize = Self::MAX_NODES_PER_LAYER * Self::MAX_NODES_PER_LAYER;
 }
 
-pub fn nn_predict(input: &Vec<f32>, nn_config: NeuralNetworkConfig, output: &mut Vec<f32>) {
+pub fn nn_predict(input: &Vec<f32>, nn_config: &NeuralNetworkConfig, output: &mut Vec<f32>) {
     let mut num_input_nodes = nn_config.num_inputs;
     let mut buffer = [[0_f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; 2];
     let mut buffer_index = 0_usize;
@@ -70,7 +49,7 @@ pub fn nn_predict(input: &Vec<f32>, nn_config: NeuralNetworkConfig, output: &mut
             let mut val = 0_f32;
 
             for node_in in 0_usize..num_input_nodes {
-                val += weights[node_in] * buffer[1 - buffer_index][node_in];
+                val += weights[node_in] * buffer[1_usize - buffer_index][node_in];
             }
 
             val += bias[node_out];
@@ -82,7 +61,7 @@ pub fn nn_predict(input: &Vec<f32>, nn_config: NeuralNetworkConfig, output: &mut
         }
 
         num_input_nodes = num_output_nodes;
-        buffer_index = 1 - buffer_index;
+        buffer_index = 1_usize - buffer_index;
     }
 
     // Final output layer
@@ -102,9 +81,57 @@ pub fn nn_predict(input: &Vec<f32>, nn_config: NeuralNetworkConfig, output: &mut
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use libc;
     use rand::{ChaChaRng, Rng};
+    use std;
 
     const MAX_ITER: usize = 50000;
+
+    extern {
+        #[cfg(test)]
+        fn av1_nn_predict(features: *const libc::c_float, nn_config: *const NN_CONFIG,
+                          output: *mut libc::c_float);
+    }
+
+    // Copied from C
+    #[repr(C)]
+    struct NN_CONFIG {
+        num_inputs: libc::c_int,         // Number of input nodes, i.e. features.
+        num_outputs: libc::c_int,        // Number of output nodes.
+        num_hidden_layers: libc::c_int,  // Number of hidden layers, maximum 10.
+        // Number of nodes for each hidden layer.
+        num_hidden_nodes: [libc::c_int; NeuralNetworkConfig::MAX_HIDDEN_LAYERS],
+        // Weight parameters, indexed by layer.
+        weights: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
+        // Bias parameters, indexed by layer.
+        bias: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1]
+    }
+
+    impl NN_CONFIG {
+        fn new(config: &NeuralNetworkConfig) -> Self {
+            let mut num_hidden_nodes: [libc::c_int; NeuralNetworkConfig::MAX_HIDDEN_LAYERS] =
+                unsafe { std::mem::uninitialized() };
+            let mut weights: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1] =
+                unsafe { std::mem::uninitialized() };
+            let mut bias: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1] =
+                unsafe { std::mem::uninitialized() };
+
+            for i in 0_usize..NeuralNetworkConfig::MAX_HIDDEN_LAYERS {
+                num_hidden_nodes[i] = config.num_hidden_nodes[i] as libc::c_int;
+                weights[i] = config.weights[i].as_ptr();
+                bias[i] = config.bias[i].as_ptr();
+            }
+
+            NN_CONFIG {
+                num_inputs: config.num_inputs as libc::c_int,
+                num_outputs: config.num_outputs as libc::c_int,
+                num_hidden_layers: config.num_hidden_layers as libc::c_int,
+                num_hidden_nodes: num_hidden_nodes,
+                weights: weights,
+                bias: bias
+            }
+        }
+    }
 
     fn setup_pred(ra: &mut ChaChaRng) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         let size: usize = 32;
@@ -117,26 +144,9 @@ pub mod test {
         (input, o1, o2)
     }
 
-    fn pred_aom(input: &Vec<f32>, nn_config: NeuralNetworkConfig, output: &mut Vec<f32>) {
+    fn pred_aom(input: &Vec<f32>, nn_config: &NeuralNetworkConfig, output: &mut Vec<f32>) {
         // Remap manually, since map-collect does not work on arrays
-        let mut num_hidden_nodes = [0; NeuralNetworkConfig::MAX_HIDDEN_LAYERS];
-        let mut weights = [std::ptr::null::<libc::c_float>(); NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
-        let mut bias= [std::ptr::null::<libc::c_float>(); NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
-
-        for i in 0_usize..NeuralNetworkConfig::MAX_HIDDEN_LAYERS {
-            num_hidden_nodes[i] = nn_config.num_hidden_nodes[i] as libc::c_int;
-            weights[i] = nn_config.weights[i].as_ptr();
-            bias[i] = nn_config.bias[i].as_ptr();
-        }
-
-        let config = NN_CONFIG {
-            num_inputs: nn_config.num_inputs as libc::c_int,
-            num_outputs: nn_config.num_outputs as libc::c_int,
-            num_hidden_layers: nn_config.num_hidden_layers as libc::c_int,
-            num_hidden_nodes: num_hidden_nodes,
-            weights: weights,
-            bias: bias
-        };
+        let config = NN_CONFIG::new(&nn_config);
 
         unsafe {
             av1_nn_predict(input.as_ptr(), &config, output.as_mut_ptr() )
@@ -146,8 +156,10 @@ pub mod test {
     fn do_pred(ra: &mut ChaChaRng) -> (Vec<f32>, Vec<f32>) {
         let (input, mut o1, mut o2) = setup_pred(ra);
 
-        let mut weights = [[0_f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
-        let mut bias = [[0_f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+        let mut weights =
+            [[0_f32; NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+        let mut bias =
+            [[0_f32; NeuralNetworkConfig::MAX_NODES_PER_LAYER]; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
 
         for i in 0..4 {
             for j in 0..4 {
@@ -165,8 +177,8 @@ pub mod test {
             bias: bias
         };
 
-        pred_aom(&input, config.clone(), &mut o1);
-        nn_predict(&input, config.clone(), &mut o2);
+        pred_aom(&input, &config.clone(), &mut o1);
+        nn_predict(&input, &config.clone(), &mut o2);
 
         (o1, o2)
     }

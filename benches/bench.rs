@@ -15,43 +15,92 @@ extern crate rav1e;
 
 use bencher::*;
 use rand::{ChaChaRng, Rng, SeedableRng};
+use rav1e::*;
+use rav1e::context::*;
+use rav1e::ec;
+use rav1e::ml::*;
+use rav1e::partition::*;
 use rav1e::predict::*;
 
+// Copied from C
+// FIXME: duplicated from ml.rs
+#[repr(C)]
+struct NN_CONFIG {
+    num_inputs: libc::c_int,         // Number of input nodes, i.e. features.
+    num_outputs: libc::c_int,        // Number of output nodes.
+    num_hidden_layers: libc::c_int,  // Number of hidden layers, maximum 10.
+    // Number of nodes for each hidden layer.
+    num_hidden_nodes: [libc::c_int; NeuralNetworkConfig::MAX_HIDDEN_LAYERS],
+    // Weight parameters, indexed by layer.
+    weights: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
+    // Bias parameters, indexed by layer.
+    bias: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1]
+}
+
+impl NN_CONFIG {
+    fn new(config: &NeuralNetworkConfig) -> Self {
+        let mut num_hidden_nodes: [libc::c_int; NeuralNetworkConfig::MAX_HIDDEN_LAYERS] =
+            unsafe { std::mem::uninitialized() };
+        let mut weights: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1] =
+            unsafe { std::mem::uninitialized() };
+        let mut bias: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1] =
+            unsafe { std::mem::uninitialized() };
+
+        for i in 0_usize..NeuralNetworkConfig::MAX_HIDDEN_LAYERS {
+            num_hidden_nodes[i] = config.num_hidden_nodes[i] as libc::c_int;
+            weights[i] = config.weights[i].as_ptr();
+            bias[i] = config.bias[i].as_ptr();
+        }
+
+        NN_CONFIG {
+            num_inputs: config.num_inputs as libc::c_int,
+            num_outputs: config.num_outputs as libc::c_int,
+            num_hidden_layers: config.num_hidden_layers as libc::c_int,
+            num_hidden_nodes: num_hidden_nodes,
+            weights: weights,
+            bias: bias
+        }
+    }
+}
+
 extern {
-  fn highbd_dc_predictor(
-    dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int, bh: libc::c_int,
-    above: *const u16, left: *const u16, bd: libc::c_int
-  );
+    fn highbd_dc_predictor(
+        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
+        bh: libc::c_int, above: *const u16,
+        left: *const u16, bd: libc::c_int);
 
-  fn highbd_h_predictor(
-    dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int, bh: libc::c_int,
-    above: *const u16, left: *const u16, bd: libc::c_int
-  );
+    fn highbd_h_predictor(
+        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
+        bh: libc::c_int, above: *const u16,
+        left: *const u16, bd: libc::c_int);
 
-  fn highbd_v_predictor(
-    dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int, bh: libc::c_int,
-    above: *const u16, left: *const u16, bd: libc::c_int
-  );
+    fn highbd_v_predictor(
+        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
+        bh: libc::c_int, above: *const u16,
+        left: *const u16, bd: libc::c_int);
 
-  fn highbd_paeth_predictor(
-    dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int, bh: libc::c_int,
-    above: *const u16, left: *const u16, bd: libc::c_int
-  );
+    fn highbd_paeth_predictor(
+        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
+        bh: libc::c_int, above: *const u16,
+        left: *const u16, bd: libc::c_int);
 
-  fn highbd_smooth_predictor(
-    dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int, bh: libc::c_int,
-    above: *const u16, left: *const u16, bd: libc::c_int
-  );
+    fn highbd_smooth_predictor(
+        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
+        bh: libc::c_int, above: *const u16,
+        left: *const u16, bd: libc::c_int);
 
-  fn highbd_smooth_h_predictor(
-    dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int, bh: libc::c_int,
-    above: *const u16, left: *const u16, bd: libc::c_int
-  );
+    fn highbd_smooth_h_predictor(
+        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
+        bh: libc::c_int, above: *const u16,
+        left: *const u16, bd: libc::c_int);
 
-  fn highbd_smooth_v_predictor(
-    dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int, bh: libc::c_int,
-    above: *const u16, left: *const u16, bd: libc::c_int
-  );
+    fn highbd_smooth_v_predictor(
+        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
+        bh: libc::c_int, above: *const u16,
+        left: *const u16, bd: libc::c_int);
+
+    fn av1_nn_predict(features: *const libc::c_float, nn_config: *const NN_CONFIG,
+        output: *mut libc::c_float);
 }
 
 #[inline(always)]
@@ -169,6 +218,13 @@ fn pred_smooth_v_4x4(
   }
 }
 
+#[inline(always)]
+fn pred_nn(input: &[f32], config: &NN_CONFIG, output: &mut [f32]) {
+    unsafe {
+        av1_nn_predict(input.as_ptr(), config, output.as_mut_ptr() )
+    }
+}
+
 const MAX_ITER: usize = 50000;
 
 fn setup_pred(ra: &mut ChaChaRng) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
@@ -177,6 +233,40 @@ fn setup_pred(ra: &mut ChaChaRng) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
   let left: Vec<u16> = (0..32).map(|_| ra.gen()).collect();
 
   (above, left, output)
+}
+
+fn setup_pred_nn(ra: &mut ChaChaRng) -> (Vec<f32>, ml::NeuralNetworkConfig, Vec<f32>) {
+    let mut weights =
+        [[0_f32; ml::NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER]; ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+
+    for i in 0..ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1 {
+        for j in 0..ml::NeuralNetworkConfig::MAX_CONNECTIONS_PER_LAYER {
+            weights[i][j] = ra.gen();
+        }
+    }
+
+    let mut bias =
+        [[0_f32; ml::NeuralNetworkConfig::MAX_NODES_PER_LAYER]; ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+
+    for i in 0..ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1 {
+        for j in 0..ml::NeuralNetworkConfig::MAX_NODES_PER_LAYER {
+            bias[i][j] = ra.gen();
+        }
+    }
+
+    let config = NeuralNetworkConfig {
+        num_inputs: 14,
+        num_outputs: 4,
+        num_hidden_layers: 4,
+        num_hidden_nodes: [12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
+        weights: weights,
+        bias: bias
+    };
+
+    let output = vec![0f32; config.num_outputs];
+    let input: Vec<f32> = (0..config.num_inputs).map(|_| ra.gen()).collect();
+
+    (input, config, output)
 }
 
 fn intra_dc_pred_native(b: &mut Bencher) {
@@ -340,10 +430,30 @@ fn intra_smooth_v_pred_aom(b: &mut Bencher) {
   })
 }
 
-use rav1e::context::*;
-use rav1e::ec;
-use rav1e::partition::*;
-use rav1e::*;
+fn nn_pred_native(b: &mut Bencher) {
+    let mut ra = ChaChaRng::new_unseeded();
+
+    let (input, config, mut output) = setup_pred_nn(&mut ra);
+
+    b.iter(|| {
+        for _ in 0..MAX_ITER {
+            ml::nn_predict(&input, &config, &mut output);
+        }
+    })
+}
+
+fn nn_pred_aom(b: &mut Bencher) {
+    let mut ra = ChaChaRng::new_unseeded();
+
+    let (input, config, mut output) = setup_pred_nn(&mut ra);
+    let c_config = NN_CONFIG::new(&config);
+
+    b.iter(|| {
+        for _ in 0..MAX_ITER {
+            pred_nn(&input, &c_config, &mut output);
+        }
+    })
+}
 
 struct WriteB {
   tx_size: TxSize,
@@ -439,4 +549,7 @@ benchmark_group!(
   intra_smooth_v_pred_aom
 );
 
-benchmark_main!(intra, write_b);
+benchmark_group!(ml,
+    nn_pred_native, nn_pred_aom);
+
+benchmark_main!(intra, write_b, ml);
