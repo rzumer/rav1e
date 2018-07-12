@@ -30,26 +30,26 @@ struct NN_CONFIG {
     num_outputs: libc::c_int,        // Number of output nodes.
     num_hidden_layers: libc::c_int,  // Number of hidden layers, maximum 10.
     // Number of nodes for each hidden layer.
-    num_hidden_nodes: [libc::c_int; NeuralNetworkConfig::MAX_HIDDEN_LAYERS],
+    num_hidden_nodes: [libc::c_int; NeuralNetwork::MAX_HIDDEN_LAYERS],
     // Weight parameters, indexed by layer.
-    weights: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1],
+    weights: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
     // Bias parameters, indexed by layer.
-    bias: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1]
+    bias: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1]
 }
 
 impl NN_CONFIG {
-    fn new(config: &NeuralNetworkConfig) -> Self {
-        let mut num_hidden_nodes: [libc::c_int; NeuralNetworkConfig::MAX_HIDDEN_LAYERS] =
+    fn new(config: &NeuralNetwork) -> Self {
+        let mut num_hidden_nodes: [libc::c_int; NeuralNetwork::MAX_HIDDEN_LAYERS] =
             unsafe { std::mem::uninitialized() };
-        let mut weights: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1] =
+        let mut weights: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1] =
             unsafe { std::mem::uninitialized() };
-        let mut bias: [*const libc::c_float; NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1] =
+        let mut biases: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1] =
             unsafe { std::mem::uninitialized() };
 
-        for i in 0_usize..NeuralNetworkConfig::MAX_HIDDEN_LAYERS {
+        for i in 0_usize..NeuralNetwork::MAX_HIDDEN_LAYERS {
             num_hidden_nodes[i] = config.num_hidden_nodes[i] as libc::c_int;
             weights[i] = config.weights[i].as_ptr();
-            bias[i] = config.bias[i].as_ptr();
+            biases[i] = config.biases[i].as_ptr();
         }
 
         NN_CONFIG {
@@ -58,7 +58,7 @@ impl NN_CONFIG {
             num_hidden_layers: config.num_hidden_layers as libc::c_int,
             num_hidden_nodes: num_hidden_nodes,
             weights: weights,
-            bias: bias
+            bias: biases
         }
     }
 }
@@ -235,32 +235,32 @@ fn setup_pred(ra: &mut ChaChaRng) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
   (above, left, output)
 }
 
-fn setup_pred_nn(ra: &mut ChaChaRng) -> (Vec<f32>, ml::NeuralNetworkConfig, Vec<f32>) {
+fn setup_pred_nn(ra: &mut ChaChaRng) -> (Vec<f32>, ml::NeuralNetwork, Vec<f32>) {
     let mut weights =
-        [[0_f32; ml::NeuralNetworkConfig::MAX_WEIGHTS_PER_LAYER]; ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+        [[0_f32; ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER]; ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
-    for i in 0..ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1 {
-        for j in 0..ml::NeuralNetworkConfig::MAX_WEIGHTS_PER_LAYER {
+    for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
+        for j in 0..ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER {
             weights[i][j] = ra.gen();
         }
     }
 
-    let mut bias =
-        [[0_f32; ml::NeuralNetworkConfig::MAX_NODES_PER_LAYER]; ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1];
+    let mut biases =
+        [[0_f32; ml::NeuralNetwork::MAX_NODES_PER_LAYER]; ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
-    for i in 0..ml::NeuralNetworkConfig::MAX_HIDDEN_LAYERS + 1 {
-        for j in 0..ml::NeuralNetworkConfig::MAX_NODES_PER_LAYER {
-            bias[i][j] = ra.gen();
+    for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
+        for j in 0..ml::NeuralNetwork::MAX_NODES_PER_LAYER {
+            biases[i][j] = ra.gen();
         }
     }
 
-    let config = NeuralNetworkConfig {
+    let config = NeuralNetwork {
         num_inputs: 14,
         num_outputs: 4,
         num_hidden_layers: 4,
         num_hidden_nodes: [12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
         weights: weights,
-        bias: bias
+        biases: biases
     };
 
     let output = vec![0f32; config.num_outputs];
@@ -437,7 +437,7 @@ fn nn_pred_native(b: &mut Bencher) {
 
     b.iter(|| {
         for _ in 0..MAX_ITER {
-            ml::nn_predict(&input, &config, &mut output);
+            config.predict(&input, &mut output);
         }
     })
 }
