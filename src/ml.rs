@@ -1012,7 +1012,7 @@ pub mod test {
     use rand::{ChaChaRng, Rng};
     use std;
 
-    const MAX_ITER: usize = 50000;
+    const MAX_ITER: usize = 10;
 
     extern {
         #[cfg(test)]
