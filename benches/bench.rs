@@ -15,97 +15,138 @@ extern crate rav1e;
 
 use bencher::*;
 use rand::{ChaChaRng, Rng, SeedableRng};
-use rav1e::*;
 use rav1e::context::*;
 use rav1e::ec;
 use rav1e::ml::*;
 use rav1e::partition::*;
 use rav1e::predict::*;
+use rav1e::*;
 
 // Copied from C
 // FIXME: duplicated from ml.rs
 #[repr(C)]
 struct NN_CONFIG {
-    num_inputs: libc::c_int,         // Number of input nodes, i.e. features.
-    num_outputs: libc::c_int,        // Number of output nodes.
-    num_hidden_layers: libc::c_int,  // Number of hidden layers, maximum 10.
-    // Number of nodes for each hidden layer.
-    num_hidden_nodes: [libc::c_int; NeuralNetwork::MAX_HIDDEN_LAYERS],
-    // Weight parameters, indexed by layer.
-    weights: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
-    // Bias parameters, indexed by layer.
-    bias: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1]
+  num_inputs: libc::c_int, // Number of input nodes, i.e. features.
+  num_outputs: libc::c_int, // Number of output nodes.
+  num_hidden_layers: libc::c_int, // Number of hidden layers, maximum 10.
+  // Number of nodes for each hidden layer.
+  num_hidden_nodes: [libc::c_int; NeuralNetwork::MAX_HIDDEN_LAYERS],
+  // Weight parameters, indexed by layer.
+  weights: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
+  // Bias parameters, indexed by layer.
+  bias: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
 }
 
 impl NN_CONFIG {
-    fn new(config: &NeuralNetwork) -> Self {
-        let mut num_hidden_nodes: [libc::c_int; NeuralNetwork::MAX_HIDDEN_LAYERS] =
-            unsafe { std::mem::uninitialized() };
-        let mut weights: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1] =
-            unsafe { std::mem::uninitialized() };
-        let mut biases: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1] =
-            unsafe { std::mem::uninitialized() };
+  fn new(config: &NeuralNetwork) -> Self {
+    let mut num_hidden_nodes =
+      [0 as libc::c_int; NeuralNetwork::MAX_HIDDEN_LAYERS];
+    let mut weights = [std::ptr::null::<libc::c_float>();
+      NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
+    let mut biases = [std::ptr::null::<libc::c_float>();
+      NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
-        for i in 0_usize..NeuralNetwork::MAX_HIDDEN_LAYERS {
-            num_hidden_nodes[i] = config.num_hidden_nodes[i] as libc::c_int;
-            weights[i] = config.weights[i].as_ptr();
-            biases[i] = config.biases[i].as_ptr();
-        }
-
-        NN_CONFIG {
-            num_inputs: config.num_inputs as libc::c_int,
-            num_outputs: config.num_outputs as libc::c_int,
-            num_hidden_layers: config.num_hidden_layers as libc::c_int,
-            num_hidden_nodes: num_hidden_nodes,
-            weights: weights,
-            bias: biases
-        }
+    for i in 0_usize..NeuralNetwork::MAX_HIDDEN_LAYERS {
+      num_hidden_nodes[i] = config.num_hidden_nodes[i] as libc::c_int;
+      weights[i] = config.weights[i].as_ptr();
+      biases[i] = config.biases[i].as_ptr();
     }
+
+    NN_CONFIG {
+      num_inputs: config.num_inputs as libc::c_int,
+      num_outputs: config.num_outputs as libc::c_int,
+      num_hidden_layers: config.num_hidden_layers as libc::c_int,
+      num_hidden_nodes: num_hidden_nodes,
+      weights: weights,
+      bias: biases,
+    }
+  }
 }
 
 extern {
-    fn highbd_dc_predictor(
-        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
-        bh: libc::c_int, above: *const u16,
-        left: *const u16, bd: libc::c_int);
+  fn highbd_dc_predictor(
+    dst: *mut u16,
+    stride: libc::ptrdiff_t,
+    bw: libc::c_int,
+    bh: libc::c_int,
+    above: *const u16,
+    left: *const u16,
+    bd: libc::c_int,
+  );
 
-    fn highbd_h_predictor(
-        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
-        bh: libc::c_int, above: *const u16,
-        left: *const u16, bd: libc::c_int);
+  fn highbd_h_predictor(
+    dst: *mut u16,
+    stride: libc::ptrdiff_t,
+    bw: libc::c_int,
+    bh: libc::c_int,
+    above: *const u16,
+    left: *const u16,
+    bd: libc::c_int,
+  );
 
-    fn highbd_v_predictor(
-        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
-        bh: libc::c_int, above: *const u16,
-        left: *const u16, bd: libc::c_int);
+  fn highbd_v_predictor(
+    dst: *mut u16,
+    stride: libc::ptrdiff_t,
+    bw: libc::c_int,
+    bh: libc::c_int,
+    above: *const u16,
+    left: *const u16,
+    bd: libc::c_int,
+  );
 
-    fn highbd_paeth_predictor(
-        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
-        bh: libc::c_int, above: *const u16,
-        left: *const u16, bd: libc::c_int);
+  fn highbd_paeth_predictor(
+    dst: *mut u16,
+    stride: libc::ptrdiff_t,
+    bw: libc::c_int,
+    bh: libc::c_int,
+    above: *const u16,
+    left: *const u16,
+    bd: libc::c_int,
+  );
 
-    fn highbd_smooth_predictor(
-        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
-        bh: libc::c_int, above: *const u16,
-        left: *const u16, bd: libc::c_int);
+  fn highbd_smooth_predictor(
+    dst: *mut u16,
+    stride: libc::ptrdiff_t,
+    bw: libc::c_int,
+    bh: libc::c_int,
+    above: *const u16,
+    left: *const u16,
+    bd: libc::c_int,
+  );
 
-    fn highbd_smooth_h_predictor(
-        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
-        bh: libc::c_int, above: *const u16,
-        left: *const u16, bd: libc::c_int);
+  fn highbd_smooth_h_predictor(
+    dst: *mut u16,
+    stride: libc::ptrdiff_t,
+    bw: libc::c_int,
+    bh: libc::c_int,
+    above: *const u16,
+    left: *const u16,
+    bd: libc::c_int,
+  );
 
-    fn highbd_smooth_v_predictor(
-        dst: *mut u16, stride: libc::ptrdiff_t, bw: libc::c_int,
-        bh: libc::c_int, above: *const u16,
-        left: *const u16, bd: libc::c_int);
+  fn highbd_smooth_v_predictor(
+    dst: *mut u16,
+    stride: libc::ptrdiff_t,
+    bw: libc::c_int,
+    bh: libc::c_int,
+    above: *const u16,
+    left: *const u16,
+    bd: libc::c_int,
+  );
 
-    fn av1_nn_predict(features: *const libc::c_float, nn_config: *const NN_CONFIG,
-        output: *mut libc::c_float);
+  fn av1_nn_predict(
+    features: *const libc::c_float,
+    nn_config: *const NN_CONFIG,
+    output: *mut libc::c_float,
+  );
 }
 
 #[inline(always)]
 fn pred_dc_4x4(
-  output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
+  output: &mut [u16],
+  stride: usize,
+  above: &[u16],
+  left: &[u16],
 ) {
   unsafe {
     highbd_dc_predictor(
@@ -115,7 +156,7 @@ fn pred_dc_4x4(
       4,
       above.as_ptr(),
       left.as_ptr(),
-      8
+      8,
     );
   }
 }
@@ -130,7 +171,7 @@ fn pred_h_4x4(output: &mut [u16], stride: usize, above: &[u16], left: &[u16]) {
       4,
       above.as_ptr(),
       left.as_ptr(),
-      8
+      8,
     );
   }
 }
@@ -145,14 +186,17 @@ fn pred_v_4x4(output: &mut [u16], stride: usize, above: &[u16], left: &[u16]) {
       4,
       above.as_ptr(),
       left.as_ptr(),
-      8
+      8,
     );
   }
 }
 
 #[inline(always)]
 fn pred_paeth_4x4(
-  output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
+  output: &mut [u16],
+  stride: usize,
+  above: &[u16],
+  left: &[u16],
 ) {
   unsafe {
     highbd_paeth_predictor(
@@ -162,14 +206,17 @@ fn pred_paeth_4x4(
       4,
       above.as_ptr(),
       left.as_ptr(),
-      8
+      8,
     );
   }
 }
 
 #[inline(always)]
 fn pred_smooth_4x4(
-  output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
+  output: &mut [u16],
+  stride: usize,
+  above: &[u16],
+  left: &[u16],
 ) {
   unsafe {
     highbd_smooth_predictor(
@@ -179,14 +226,17 @@ fn pred_smooth_4x4(
       4,
       above.as_ptr(),
       left.as_ptr(),
-      8
+      8,
     );
   }
 }
 
 #[inline(always)]
 fn pred_smooth_h_4x4(
-  output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
+  output: &mut [u16],
+  stride: usize,
+  above: &[u16],
+  left: &[u16],
 ) {
   unsafe {
     highbd_smooth_h_predictor(
@@ -196,14 +246,17 @@ fn pred_smooth_h_4x4(
       4,
       above.as_ptr(),
       left.as_ptr(),
-      8
+      8,
     );
   }
 }
 
 #[inline(always)]
 fn pred_smooth_v_4x4(
-  output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
+  output: &mut [u16],
+  stride: usize,
+  above: &[u16],
+  left: &[u16],
 ) {
   unsafe {
     highbd_smooth_v_predictor(
@@ -213,16 +266,14 @@ fn pred_smooth_v_4x4(
       4,
       above.as_ptr(),
       left.as_ptr(),
-      8
+      8,
     );
   }
 }
 
 #[inline(always)]
 fn pred_nn(input: &[f32], config: &NN_CONFIG, output: &mut [f32]) {
-    unsafe {
-        av1_nn_predict(input.as_ptr(), config, output.as_mut_ptr() )
-    }
+  unsafe { av1_nn_predict(input.as_ptr(), config, output.as_mut_ptr()) }
 }
 
 const MAX_ITER: usize = 50000;
@@ -235,38 +286,42 @@ fn setup_pred(ra: &mut ChaChaRng) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
   (above, left, output)
 }
 
-fn setup_pred_nn(ra: &mut ChaChaRng) -> (Vec<f32>, ml::NeuralNetwork, Vec<f32>) {
-    let mut weights =
-        [[0_f32; ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER]; ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
+fn setup_pred_nn(
+  ra: &mut ChaChaRng,
+) -> (Vec<f32>, ml::NeuralNetwork, Vec<f32>) {
+  let mut weights = [[0_f32; ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
+    ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
-    for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
-        for j in 0..ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER {
-            weights[i][j] = ra.gen();
-        }
+  for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
+    for j in 0..ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER {
+      weights[i][j] = ra.gen();
     }
+  }
 
-    let mut biases =
-        [[0_f32; ml::NeuralNetwork::MAX_NODES_PER_LAYER]; ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
+  let mut biases = [[0_f32; ml::NeuralNetwork::MAX_NODES_PER_LAYER];
+    ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
-    for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
-        for j in 0..ml::NeuralNetwork::MAX_NODES_PER_LAYER {
-            biases[i][j] = ra.gen();
-        }
+  for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
+    for j in 0..ml::NeuralNetwork::MAX_NODES_PER_LAYER {
+      biases[i][j] = ra.gen();
     }
+  }
 
-    let config = NeuralNetwork {
-        num_inputs: 14,
-        num_outputs: 4,
-        num_hidden_layers: 4,
-        num_hidden_nodes: [12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
-        weights: weights,
-        biases: biases
-    };
+  let config = NeuralNetwork {
+    num_inputs: 14,
+    num_outputs: 4,
+    num_hidden_layers: 4,
+    num_hidden_nodes: [12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
+    weights: weights,
+    biases: biases,
+  };
 
-    let output = vec![0f32; config.num_outputs];
-    let input: Vec<f32> = (0..config.num_inputs).map(|_| ra.gen()).collect();
+  let output = vec![0f32; config.num_outputs];
+  let input: Vec<f32> = (0..config.num_inputs)
+    .map(|_| ra.gen())
+    .collect();
 
-    (input, config, output)
+  (input, config, output)
 }
 
 fn intra_dc_pred_native(b: &mut Bencher) {
@@ -347,7 +402,7 @@ fn intra_paeth_pred_native(b: &mut Bencher) {
         32,
         &above[..4],
         &left[..4],
-        above_left
+        above_left,
       );
     }
   })
@@ -431,33 +486,33 @@ fn intra_smooth_v_pred_aom(b: &mut Bencher) {
 }
 
 fn nn_pred_native(b: &mut Bencher) {
-    let mut ra = ChaChaRng::new_unseeded();
+  let mut ra = ChaChaRng::new_unseeded();
 
-    let (input, config, mut output) = setup_pred_nn(&mut ra);
+  let (input, config, mut output) = setup_pred_nn(&mut ra);
 
-    b.iter(|| {
-        for _ in 0..MAX_ITER {
-            config.predict(&input, &mut output);
-        }
-    })
+  b.iter(|| {
+    for _ in 0..MAX_ITER {
+      config.predict(&input, &mut output);
+    }
+  })
 }
 
 fn nn_pred_aom(b: &mut Bencher) {
-    let mut ra = ChaChaRng::new_unseeded();
+  let mut ra = ChaChaRng::new_unseeded();
 
-    let (input, config, mut output) = setup_pred_nn(&mut ra);
-    let c_config = NN_CONFIG::new(&config);
+  let (input, config, mut output) = setup_pred_nn(&mut ra);
+  let c_config = NN_CONFIG::new(&config);
 
-    b.iter(|| {
-        for _ in 0..MAX_ITER {
-            pred_nn(&input, &c_config, &mut output);
-        }
-    })
+  b.iter(|| {
+    for _ in 0..MAX_ITER {
+      pred_nn(&input, &c_config, &mut output);
+    }
+  })
 }
 
 struct WriteB {
   tx_size: TxSize,
-  qi: usize
+  qi: usize,
 }
 
 impl TDynBenchFn for WriteB {
@@ -474,8 +529,16 @@ pub fn write_b() -> Vec<TestDescAndFn> {
       let w = WriteB { tx_size, qi };
       let n = format!("write_b_bench({:?}, {})", tx_size, qi);
       benches.push(TestDescAndFn {
+<<<<<<< HEAD
         desc: TestDesc { name: Cow::from(n), ignore: false },
         testfn: TestFn::DynBenchFn(Box::new(w))
+=======
+        desc: TestDesc {
+          name: Cow::from(n),
+          ignore: false,
+        },
+        testfn: TestFn::DynBenchFn(Box::new(w)),
+>>>>>>> Apply rustfmt on ML framework
       });
     }
   }
@@ -504,12 +567,22 @@ fn write_b_bench(b: &mut Bencher, tx_size: TxSize, qindex: usize) {
   b.iter(|| {
     for &mode in RAV1E_INTRA_MODES {
       let sbo = SuperBlockOffset { x: sbx, y: sby };
+<<<<<<< HEAD
       fs.qc.update(fi.config.quantizer, tx_size);
+=======
+>>>>>>> Apply rustfmt on ML framework
       for p in 1..3 {
         for by in 0..8 {
           for bx in 0..8 {
             let bo = sbo.block_offset(bx, by);
+<<<<<<< HEAD
             let tx_bo = BlockOffset { x: bo.x + bx, y: bo.y + by };
+=======
+            let tx_bo = BlockOffset {
+              x: bo.x + bx,
+              y: bo.y + by,
+            };
+>>>>>>> Apply rustfmt on ML framework
             let po = tx_bo.plane_offset(&fs.input.planes[p].cfg);
             encode_tx_block(
               &mut fi,
@@ -522,7 +595,7 @@ fn write_b_bench(b: &mut Bencher, tx_size: TxSize, qindex: usize) {
               tx_type,
               tx_size.block_size(),
               &po,
-              false
+              false,
             );
           }
         }
@@ -549,7 +622,6 @@ benchmark_group!(
   intra_smooth_v_pred_aom
 );
 
-benchmark_group!(ml,
-    nn_pred_native, nn_pred_aom);
+benchmark_group!(ml, nn_pred_native, nn_pred_aom);
 
 benchmark_main!(intra, write_b, ml);
