@@ -29,7 +29,7 @@ impl NeuralNetwork {
   pub const MAX_WEIGHTS_PER_LAYER: usize =
     (Self::MAX_NODES_PER_LAYER - 1) * (Self::MAX_NODES_PER_LAYER - 1);
 
-  pub fn predict(&self, input: &Vec<f32>, output: &mut Vec<f32>) {
+  pub fn predict(&self, input: &Vec<f32>) -> Vec<f32> {
     let mut num_input_nodes = self.num_inputs;
     let mut buffer = [[0_f32; NeuralNetwork::MAX_NODES_PER_LAYER]; 2];
     let mut buffer_index = 0_usize;
@@ -70,6 +70,8 @@ impl NeuralNetwork {
       buffer_index = 1_usize - buffer_index;
     }
 
+    let mut output = Vec::<f32>::with_capacity(self.num_outputs);
+
     // Final output layer
     for node_out in 0_usize..self.num_outputs {
       let weights = &self.weights[num_layers][node_out * num_input_nodes..];
@@ -80,8 +82,10 @@ impl NeuralNetwork {
         val += weights[node_in] * buffer[1 - buffer_index][node_in];
       }
 
-      output[node_out] = val + biases[node_out];
+      output.push(val + biases[node_out]);
     }
+
+    output
   }
 }
 
@@ -146,15 +150,15 @@ pub mod test {
     }
   }
 
-  fn setup_pred(ra: &mut ChaChaRng) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let size: usize = 32;
-    let output = vec![0f32; size];
-    let input: Vec<f32> = (0..size).map(|_| ra.gen()).collect();
+  fn setup_pred(
+    ra: &mut ChaChaRng,
+    num_inputs: usize,
+    num_outputs: usize,
+  ) -> (Vec<f32>, Vec<f32>) {
+    let input: Vec<f32> = (0..num_inputs).map(|_| ra.gen()).collect();
+    let output = vec![0f32; num_outputs];
 
-    let o1 = output.clone();
-    let o2 = output.clone();
-
-    (input, o1, o2)
+    (input, output)
   }
 
   fn pred_aom(
@@ -168,7 +172,9 @@ pub mod test {
   }
 
   fn do_pred(ra: &mut ChaChaRng) -> (Vec<f32>, Vec<f32>) {
-    let (input, mut o1, mut o2) = setup_pred(ra);
+    let num_inputs = 14;
+    let num_outputs = 4;
+    let (input, mut o1) = setup_pred(ra, num_inputs, num_outputs);
 
     // Declare test weights and biases as static, such that they do not overflow the stack during tests
     static mut WEIGHTS: [[f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
@@ -198,8 +204,8 @@ pub mod test {
     }
 
     let config = NeuralNetwork {
-      num_inputs: 14,
-      num_outputs: 4,
+      num_inputs: num_inputs,
+      num_outputs: num_outputs,
       num_hidden_layers: 4,
       num_hidden_nodes: &[12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
       weights: unsafe { &WEIGHTS },
@@ -207,7 +213,7 @@ pub mod test {
     };
 
     pred_aom(&input, &config.clone(), &mut o1);
-    config.predict(&input, &mut o2);
+    let o2 = config.predict(&input);
 
     (o1, o2)
   }
