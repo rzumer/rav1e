@@ -16,11 +16,11 @@ pub struct NeuralNetwork {
   pub num_inputs: usize,
   pub num_outputs: usize,
   pub num_hidden_layers: usize,
-  pub num_hidden_nodes: [usize; NeuralNetwork::MAX_HIDDEN_LAYERS],
-  pub weights: [[f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
-    NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
-  pub biases: [[f32; NeuralNetwork::MAX_NODES_PER_LAYER];
-    NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
+  pub num_hidden_nodes: &'static [usize; NeuralNetwork::MAX_HIDDEN_LAYERS],
+  pub weights: &'static [[f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
+             NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
+  pub biases: &'static [[f32; NeuralNetwork::MAX_NODES_PER_LAYER];
+             NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
 }
 
 impl NeuralNetwork {
@@ -31,7 +31,7 @@ impl NeuralNetwork {
 
   pub fn predict(&self, input: &Vec<f32>, output: &mut Vec<f32>) {
     let mut num_input_nodes = self.num_inputs;
-    let mut buffer: [[f32; 128]; 2] = [[0_f32; 128]; 2];
+    let mut buffer = [[0_f32; NeuralNetwork::MAX_NODES_PER_LAYER]; 2];
     let mut buffer_index = 0_usize;
 
     // Copy input vector to buffer since borrows collide
@@ -167,21 +167,30 @@ pub mod test {
   fn do_pred(ra: &mut ChaChaRng) -> (Vec<f32>, Vec<f32>) {
     let (input, mut o1, mut o2) = setup_pred(ra);
 
-    let mut weights = [[0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
+    // Declare test weights and biases as static, such that they do not overflow the stack during tests
+    static mut WEIGHTS: [[f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
+      NeuralNetwork::MAX_HIDDEN_LAYERS + 1] = [[0_f32;
+      NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
       NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
     for i in 0..NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
       for j in 0..NeuralNetwork::MAX_WEIGHTS_PER_LAYER {
-        weights[i][j] = ra.gen();
+        unsafe {
+          WEIGHTS[i][j] = ra.gen();
+        }
       }
     }
 
-    let mut biases = [[0_f32; NeuralNetwork::MAX_NODES_PER_LAYER];
+    static mut BIASES: [[f32; NeuralNetwork::MAX_NODES_PER_LAYER];
+      NeuralNetwork::MAX_HIDDEN_LAYERS + 1] = [[0_f32;
+      NeuralNetwork::MAX_NODES_PER_LAYER];
       NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
     for i in 0..NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
       for j in 0..NeuralNetwork::MAX_NODES_PER_LAYER {
-        biases[i][j] = ra.gen();
+        unsafe {
+          BIASES[i][j] = ra.gen();
+        }
       }
     }
 
@@ -189,9 +198,9 @@ pub mod test {
       num_inputs: 14,
       num_outputs: 4,
       num_hidden_layers: 4,
-      num_hidden_nodes: [12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
-      weights: weights,
-      biases: biases,
+      num_hidden_nodes: &[12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
+      weights: unsafe { &WEIGHTS },
+      biases: unsafe { &BIASES },
     };
 
     pred_aom(&input, &config.clone(), &mut o1);

@@ -289,21 +289,29 @@ fn setup_pred(ra: &mut ChaChaRng) -> (Vec<u16>, Vec<u16>, Vec<u16>) {
 fn setup_pred_nn(
   ra: &mut ChaChaRng,
 ) -> (Vec<f32>, ml::NeuralNetwork, Vec<f32>) {
-  let mut weights = [[0_f32; ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
+  static mut WEIGHTS: [[f32; ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
+    ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1] = [[0_f32;
+    ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
     ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
   for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
     for j in 0..ml::NeuralNetwork::MAX_WEIGHTS_PER_LAYER {
-      weights[i][j] = ra.gen();
+      unsafe {
+        WEIGHTS[i][j] = ra.gen();
+      }
     }
   }
 
-  let mut biases = [[0_f32; ml::NeuralNetwork::MAX_NODES_PER_LAYER];
+  static mut BIASES: [[f32; ml::NeuralNetwork::MAX_NODES_PER_LAYER];
+    ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1] = [[0_f32;
+    ml::NeuralNetwork::MAX_NODES_PER_LAYER];
     ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
   for i in 0..ml::NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
     for j in 0..ml::NeuralNetwork::MAX_NODES_PER_LAYER {
-      biases[i][j] = ra.gen();
+      unsafe {
+        BIASES[i][j] = ra.gen();
+      }
     }
   }
 
@@ -311,9 +319,9 @@ fn setup_pred_nn(
     num_inputs: 14,
     num_outputs: 4,
     num_hidden_layers: 4,
-    num_hidden_nodes: [12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
-    weights: weights,
-    biases: biases,
+    num_hidden_nodes: &[12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
+    weights: unsafe { &WEIGHTS },
+    biases: unsafe { &BIASES },
   };
 
   let output = vec![0f32; config.num_outputs];
