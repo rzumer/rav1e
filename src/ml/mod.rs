@@ -126,8 +126,11 @@ pub mod test {
       let mut biases = [std::ptr::null::<libc::c_float>();
         NeuralNetwork::MAX_HIDDEN_LAYERS + 1];
 
-      for i in 0_usize..NeuralNetwork::MAX_HIDDEN_LAYERS {
-        num_hidden_nodes[i] = config.num_hidden_nodes[i] as libc::c_int;
+      for i in 0_usize..NeuralNetwork::MAX_HIDDEN_LAYERS + 1 {
+        if i < NeuralNetwork::MAX_HIDDEN_LAYERS {
+          num_hidden_nodes[i] = config.num_hidden_nodes[i] as libc::c_int;
+        }
+
         weights[i] = config.weights[i].as_ptr();
         biases[i] = config.biases[i].as_ptr();
       }
