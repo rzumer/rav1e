@@ -325,9 +325,7 @@ fn setup_pred_nn(
   };
 
   let output = vec![0f32; config.num_outputs];
-  let input: Vec<f32> = (0..config.num_inputs)
-    .map(|_| ra.gen())
-    .collect();
+  let input: Vec<f32> = (0..config.num_inputs).map(|_| ra.gen()).collect();
 
   (input, config, output)
 }
@@ -500,7 +498,7 @@ fn nn_pred_native(b: &mut Bencher) {
 
   b.iter(|| {
     for _ in 0..MAX_ITER {
-      config.predict(&input, &mut output);
+      config.predict(&input);
     }
   })
 }
