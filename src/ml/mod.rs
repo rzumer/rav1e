@@ -76,16 +76,23 @@ impl NeuralNetwork {
     let mut output = Vec::<f32>::with_capacity(self.num_outputs);
 
     // Final output layer
+    let biases = self.biases[num_layers];
+    let layer_weights = &self.weights[num_layers];
+
     for node_out in 0_usize..self.num_outputs {
-      let weights = &self.weights[num_layers][node_out * num_input_nodes..];
-      let biases = self.biases[num_layers];
-      let mut val = 0_f32;
+      let weights = &layer_weights[node_out * num_input_nodes..];
+      let bias = biases[node_out];
 
-      for node_in in 0_usize..num_input_nodes {
-        val += weights[node_in] * buffer[1 - buffer_index][node_in];
-      }
+      let mut val = bias + {
+        let buffer_nodes = &buffer[1_usize - buffer_index];
 
-      output.push(val + biases[node_out]);
+        weights[..num_input_nodes]
+          .iter()
+          .zip(buffer_nodes[..num_input_nodes].iter())
+          .fold(0f32, |acc, (w, b)| acc + w * b)
+      };
+
+      output.push(val);
     }
 
     output
