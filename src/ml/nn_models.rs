@@ -3489,7 +3489,7 @@ pub const RATE_MODEL: NeuralNetwork = NeuralNetwork {
     [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
-    [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
+    [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER]
   ],
   biases: &[
     [
@@ -3535,8 +3535,8 @@ pub const RATE_MODEL: NeuralNetwork = NeuralNetwork {
     [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
-    [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
-  ],
+    [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER]
+  ]
 };
 
 pub const DISTORTION_MODEL: NeuralNetwork = NeuralNetwork {
@@ -7028,7 +7028,7 @@ pub const DISTORTION_MODEL: NeuralNetwork = NeuralNetwork {
     [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
-    [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER],
+    [0_f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER]
   ],
   biases: &[
     [
@@ -7074,6 +7074,6 @@ pub const DISTORTION_MODEL: NeuralNetwork = NeuralNetwork {
     [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
     [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
-    [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
-  ],
+    [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER]
+  ]
 };
