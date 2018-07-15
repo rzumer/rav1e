@@ -43,9 +43,11 @@ impl NeuralNetwork {
     let num_layers = self.num_hidden_layers;
     assert!(num_layers <= NeuralNetwork::MAX_HIDDEN_LAYERS);
 
+    #[inline(always)]
     fn propagate(
       num_output_nodes: usize, num_input_nodes: usize, layer_weights: &[f32],
-      layer_biases: &[f32], buf_in: &[f32], buf_out: &mut [f32]
+      layer_biases: &[f32], buf_in: &[f32], buf_out: &mut [f32],
+      cb: fn(f32) -> f32
     ) {
       for node_out in 0_usize..num_output_nodes {
         let start = node_out * num_input_nodes;
@@ -59,10 +61,7 @@ impl NeuralNetwork {
             .fold(0f32, |acc, (w, b)| acc + w * b)
         };
 
-        // ReLU as activation function
-        let val = val.max(0_f32);
-
-        buf_out[node_out] = val;
+        buf_out[node_out] = cb(val);
       }
     }
 
@@ -81,7 +80,8 @@ impl NeuralNetwork {
         layer_weights,
         biases,
         buf_in,
-        buf_out
+        buf_out,
+        |v: f32| -> f32 { v.max(0f32) }
       );
 
       use std::mem;
@@ -102,7 +102,8 @@ impl NeuralNetwork {
       layer_weights,
       biases,
       buf_in,
-      &mut output
+      &mut output,
+      |v: f32| -> f32 { v }
     );
 
     output
