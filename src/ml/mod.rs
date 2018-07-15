@@ -79,11 +79,10 @@ impl NeuralNetwork {
     let biases = self.biases[num_layers];
     let layer_weights = &self.weights[num_layers];
 
-    for node_out in 0_usize..self.num_outputs {
-      let weights = &layer_weights[node_out * num_input_nodes..];
-      let bias = biases[node_out];
-
-      let mut val = bias + {
+    for (weights, &bias) in layer_weights.chunks(num_input_nodes)
+        .take(self.num_outputs)
+        .zip(biases[..self.num_outputs].iter()) {
+      let val = bias + {
         let buffer_nodes = &buffer[1_usize - buffer_index];
 
         weights[..num_input_nodes]
