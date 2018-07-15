@@ -31,11 +31,13 @@ impl NeuralNetwork {
 
   pub fn predict(&self, input: &Vec<f32>) -> Vec<f32> {
     let mut num_input_nodes = self.num_inputs;
-    let mut buffer = [[0_f32; NeuralNetwork::MAX_NODES_PER_LAYER]; 2];
-    let mut buffer_index = 0_usize;
+    let mut buffer_0 = [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER];
+    let mut buffer_1 = [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER];
 
+    let mut buf_in = &mut buffer_0[..num_input_nodes];
+    let mut buf_out = &mut buffer_1[..num_input_nodes];
     // Copy input vector to buffer since borrows collide
-    buffer[1][..num_input_nodes].copy_from_slice(&input[..num_input_nodes]);
+    buf_in.copy_from_slice(&input[..num_input_nodes]);
 
     // Propagate hidden layers
     let num_layers = self.num_hidden_layers;
@@ -53,24 +55,22 @@ impl NeuralNetwork {
         let weights = &layer_weights[node_out * num_input_nodes..];
         let bias = biases[node_out];
         let val = bias + {
-            let buffer_nodes = &buffer[1_usize - buffer_index];
-
             weights[..num_input_nodes].iter()
-                .zip(buffer_nodes[..num_input_nodes].iter())
+                .zip(buf_in.iter())
                 .fold(0f32, |acc, (w, b)| {
                     acc + w * b
                 })
         };
 
-
         // ReLU as activation function
         let val = val.max(0_f32);
 
-        buffer[buffer_index][node_out] = val;
+        buf_out[node_out] = val;
       }
+      use std::mem;
 
       num_input_nodes = num_output_nodes;
-      buffer_index = 1_usize - buffer_index;
+      mem::swap(&mut buf_in, &mut buf_out);
     }
 
     let mut output = Vec::<f32>::with_capacity(self.num_outputs);
@@ -83,11 +83,9 @@ impl NeuralNetwork {
         .take(self.num_outputs)
         .zip(biases[..self.num_outputs].iter()) {
       let val = bias + {
-        let buffer_nodes = &buffer[1_usize - buffer_index];
-
         weights[..num_input_nodes]
           .iter()
-          .zip(buffer_nodes[..num_input_nodes].iter())
+          .zip(buf_in.iter())
           .fold(0f32, |acc, (w, b)| acc + w * b)
       };
 
