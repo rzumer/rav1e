@@ -494,7 +494,7 @@ fn intra_smooth_v_pred_aom(b: &mut Bencher) {
 fn nn_pred_native(b: &mut Bencher) {
   let mut ra = ChaChaRng::new_unseeded();
 
-  let (input, config, mut output) = setup_pred_nn(&mut ra);
+  let (input, config, _) = setup_pred_nn(&mut ra);
 
   b.iter(|| {
     for _ in 0..MAX_ITER {
