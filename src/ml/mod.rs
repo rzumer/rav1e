@@ -20,7 +20,7 @@ pub struct NeuralNetwork {
   pub weights: &'static [[f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
              NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
   pub biases: &'static [[f32; NeuralNetwork::MAX_NODES_PER_LAYER];
-             NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
+             NeuralNetwork::MAX_HIDDEN_LAYERS + 1]
 }
 
 impl NeuralNetwork {
@@ -43,23 +43,20 @@ impl NeuralNetwork {
     let num_layers = self.num_hidden_layers;
     assert!(num_layers <= NeuralNetwork::MAX_HIDDEN_LAYERS);
 
-    for ((biases, &num_output_nodes), layer_weights) in
-        self.biases[..num_layers].iter()
-            .zip(self.num_hidden_nodes[..num_layers].iter())
-            .zip(self.weights[..num_layers].iter()) {
-
-      // Bias is counted as one node towards the maximum
-      assert!(num_output_nodes < NeuralNetwork::MAX_NODES_PER_LAYER);
-
+    fn propagate(
+      num_output_nodes: usize, num_input_nodes: usize, layer_weights: &[f32],
+      layer_biases: &[f32], buf_in: &[f32], buf_out: &mut [f32]
+    ) {
       for node_out in 0_usize..num_output_nodes {
-        let weights = &layer_weights[node_out * num_input_nodes..];
-        let bias = biases[node_out];
+        let start = node_out * num_input_nodes;
+        let end = start + num_input_nodes;
+        let weights = &layer_weights[start..end];
+        let bias = layer_biases[node_out];
         let val = bias + {
-            weights[..num_input_nodes].iter()
-                .zip(buf_in.iter())
-                .fold(0f32, |acc, (w, b)| {
-                    acc + w * b
-                })
+          weights
+            .iter()
+            .zip(buf_in.iter())
+            .fold(0f32, |acc, (w, b)| acc + w * b)
         };
 
         // ReLU as activation function
@@ -67,30 +64,46 @@ impl NeuralNetwork {
 
         buf_out[node_out] = val;
       }
+    }
+
+    for ((biases, &num_output_nodes), layer_weights) in self.biases
+      [..num_layers]
+      .iter()
+      .zip(self.num_hidden_nodes[..num_layers].iter())
+      .zip(self.weights[..num_layers].iter())
+    {
+      // Bias is counted as one node towards the maximum
+      assert!(num_output_nodes < NeuralNetwork::MAX_NODES_PER_LAYER);
+
+      propagate(
+        num_output_nodes,
+        num_input_nodes,
+        layer_weights,
+        biases,
+        buf_in,
+        buf_out
+      );
+
       use std::mem;
 
       num_input_nodes = num_output_nodes;
       mem::swap(&mut buf_in, &mut buf_out);
     }
 
-    let mut output = Vec::<f32>::with_capacity(self.num_outputs);
+    let mut output = vec![0f32; self.num_outputs];
 
     // Final output layer
-    let biases = self.biases[num_layers];
+    let biases = &self.biases[num_layers];
     let layer_weights = &self.weights[num_layers];
 
-    for (weights, &bias) in layer_weights.chunks(num_input_nodes)
-        .take(self.num_outputs)
-        .zip(biases[..self.num_outputs].iter()) {
-      let val = bias + {
-        weights[..num_input_nodes]
-          .iter()
-          .zip(buf_in.iter())
-          .fold(0f32, |acc, (w, b)| acc + w * b)
-      };
-
-      output.push(val);
-    }
+    propagate(
+      self.num_outputs,
+      num_input_nodes,
+      layer_weights,
+      biases,
+      buf_in,
+      &mut output
+    );
 
     output
   }
@@ -108,9 +121,8 @@ pub mod test {
   extern {
     #[cfg(test)]
     fn av1_nn_predict(
-      features: *const libc::c_float,
-      nn_config: *const NN_CONFIG,
-      output: *mut libc::c_float,
+      features: *const libc::c_float, nn_config: *const NN_CONFIG,
+      output: *mut libc::c_float
     );
   }
 
@@ -125,7 +137,7 @@ pub mod test {
     // Weight parameters, indexed by layer.
     weights: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
     // Bias parameters, indexed by layer.
-    bias: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
+    bias: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1]
   }
 
   impl NN_CONFIG {
@@ -150,17 +162,15 @@ pub mod test {
         num_inputs: config.num_inputs as libc::c_int,
         num_outputs: config.num_outputs as libc::c_int,
         num_hidden_layers: config.num_hidden_layers as libc::c_int,
-        num_hidden_nodes: num_hidden_nodes,
-        weights: weights,
-        bias: biases,
+        num_hidden_nodes,
+        weights,
+        bias: biases
       }
     }
   }
 
   fn setup_pred(
-    ra: &mut ChaChaRng,
-    num_inputs: usize,
-    num_outputs: usize,
+    ra: &mut ChaChaRng, num_inputs: usize, num_outputs: usize
   ) -> (Vec<f32>, Vec<f32>) {
     let input: Vec<f32> = (0..num_inputs).map(|_| ra.gen()).collect();
     let output = vec![0f32; num_outputs];
@@ -169,9 +179,7 @@ pub mod test {
   }
 
   fn pred_aom(
-    input: &Vec<f32>,
-    nn_config: &NeuralNetwork,
-    output: &mut Vec<f32>,
+    input: &Vec<f32>, nn_config: &NeuralNetwork, output: &mut Vec<f32>
   ) {
     let config = NN_CONFIG::new(&nn_config);
 
@@ -211,12 +219,12 @@ pub mod test {
     }
 
     let config = NeuralNetwork {
-      num_inputs: num_inputs,
-      num_outputs: num_outputs,
+      num_inputs,
+      num_outputs,
       num_hidden_layers: 4,
       num_hidden_nodes: &[12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
       weights: unsafe { &WEIGHTS },
-      biases: unsafe { &BIASES },
+      biases: unsafe { &BIASES }
     };
 
     pred_aom(&input, &config.clone(), &mut o1);
