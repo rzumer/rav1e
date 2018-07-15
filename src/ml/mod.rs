@@ -55,8 +55,12 @@ impl NeuralNetwork {
         let weights = &layer_weights[node_out * num_input_nodes..];
         let mut val = 0_f32;
 
-        for node_in in 0_usize..num_input_nodes {
-          val += weights[node_in] * buffer[1_usize - buffer_index][node_in];
+        {
+            let buffer_nodes = &buffer[1_usize - buffer_index];
+
+            for node_in in 0_usize..num_input_nodes {
+              val += weights[node_in] * buffer_nodes[node_in];
+            }
         }
 
         val += biases[node_out];
