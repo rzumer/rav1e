@@ -35,9 +35,7 @@ impl NeuralNetwork {
     let mut buffer_index = 0_usize;
 
     // Copy input vector to buffer since borrows collide
-    for i in 0_usize..num_input_nodes {
-      buffer[1][i] = input[i];
-    }
+    buffer[1][..num_input_nodes].copy_from_slice(&input[..num_input_nodes]);
 
     // Propagate hidden layers
     let num_layers = self.num_hidden_layers;
