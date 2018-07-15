@@ -46,12 +46,13 @@ impl NeuralNetwork {
     for layer in 0..num_layers {
       let biases = self.biases[layer];
       let num_output_nodes = self.num_hidden_nodes[layer] as usize;
+      let layer_weights = &self.weights[layer];
 
       // Bias is counted as one node towards the maximum
       assert!(num_output_nodes < NeuralNetwork::MAX_NODES_PER_LAYER);
 
       for node_out in 0_usize..num_output_nodes {
-        let weights = &self.weights[layer][node_out * num_input_nodes..];
+        let weights = &layer_weights[node_out * num_input_nodes..];
         let mut val = 0_f32;
 
         for node_in in 0_usize..num_input_nodes {
