@@ -42,12 +42,7 @@ impl NeuralNetwork {
     // Propagate hidden layers
     let num_layers = self.num_hidden_layers;
     assert!(num_layers <= NeuralNetwork::MAX_HIDDEN_LAYERS);
-/*
-    for layer in 0..num_layers {
-      let biases = self.biases[layer];
-      let num_output_nodes = self.num_hidden_nodes[layer] as usize;
-      let layer_weights = &self.weights[layer];
-*/
+
     for ((biases, &num_output_nodes), layer_weights) in
         self.biases[..num_layers].iter()
             .zip(self.num_hidden_nodes[..num_layers].iter())
@@ -58,20 +53,20 @@ impl NeuralNetwork {
 
       for node_out in 0_usize..num_output_nodes {
         let weights = &layer_weights[node_out * num_input_nodes..];
-        let mut val = 0_f32;
-
-        {
+        let bias = biases[node_out];
+        let val = bias + {
             let buffer_nodes = &buffer[1_usize - buffer_index];
 
-            for node_in in 0_usize..num_input_nodes {
-              val += weights[node_in] * buffer_nodes[node_in];
-            }
-        }
+            weights[..num_input_nodes].iter()
+                .zip(buffer_nodes[..num_input_nodes].iter())
+                .fold(0f32, |acc, (w, b)| {
+                    acc + w * b
+                })
+        };
 
-        val += biases[node_out];
 
         // ReLU as activation function
-        val = val.max(0_f32);
+        let val = val.max(0_f32);
 
         buffer[buffer_index][node_out] = val;
       }
