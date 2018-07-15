@@ -42,11 +42,16 @@ impl NeuralNetwork {
     // Propagate hidden layers
     let num_layers = self.num_hidden_layers;
     assert!(num_layers <= NeuralNetwork::MAX_HIDDEN_LAYERS);
-
+/*
     for layer in 0..num_layers {
       let biases = self.biases[layer];
       let num_output_nodes = self.num_hidden_nodes[layer] as usize;
       let layer_weights = &self.weights[layer];
+*/
+    for ((biases, &num_output_nodes), layer_weights) in
+        self.biases[..num_layers].iter()
+            .zip(self.num_hidden_nodes[..num_layers].iter())
+            .zip(self.weights[..num_layers].iter()) {
 
       // Bias is counted as one node towards the maximum
       assert!(num_output_nodes < NeuralNetwork::MAX_NODES_PER_LAYER);
