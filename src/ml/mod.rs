@@ -8,7 +8,14 @@
 // Media Patent License 1.0 was not distributed with this source code in the
 // PATENTS file, you can obtain it at www.aomedia.org/license/patent.
 
+use std::mem;
+
 pub mod nn_models;
+
+pub const RECTIFIER_FUNCTION: fn(f32) -> f32 =
+  |value: f32| -> f32 { value.abs() };
+pub const IDENTITY_FUNCTION: fn(f32) -> f32 = |value: f32| -> f32 { value };
+pub const NULLIFIER_FUNCTION: fn(f32) -> f32 = |_: f32| -> f32 { 0f32 };
 
 /// Neural network configuration
 #[derive(Clone)]
@@ -20,7 +27,9 @@ pub struct NeuralNetwork {
   pub weights: &'static [[f32; NeuralNetwork::MAX_WEIGHTS_PER_LAYER];
              NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
   pub biases: &'static [[f32; NeuralNetwork::MAX_NODES_PER_LAYER];
-             NeuralNetwork::MAX_HIDDEN_LAYERS + 1]
+             NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
+  pub activation_functions:
+    &'static [fn(f32) -> f32; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
 }
 
 impl NeuralNetwork {
@@ -31,12 +40,15 @@ impl NeuralNetwork {
 
   pub fn predict(&self, input: &Vec<f32>) -> Vec<f32> {
     let mut num_input_nodes = self.num_inputs;
-    let mut buffer_0 = [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER];
-    let mut buffer_1 = [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER];
+    let mut buffer = (
+      [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
+      [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
+    );
 
-    let mut buf_in = &mut buffer_0[..num_input_nodes];
-    let mut buf_out = &mut buffer_1[..num_input_nodes];
-    // Copy input vector to buffer since borrows collide
+    let mut buf_in = &mut buffer.0[..num_input_nodes];
+    let mut buf_out = &mut buffer.1[..num_input_nodes];
+
+    // Copy input vector to buffer
     buf_in.copy_from_slice(&input[..num_input_nodes]);
 
     // Propagate hidden layers
@@ -44,47 +56,52 @@ impl NeuralNetwork {
     assert!(num_layers <= NeuralNetwork::MAX_HIDDEN_LAYERS);
 
     fn propagate(
-      num_output_nodes: usize, num_input_nodes: usize, layer_weights: &[f32],
-      layer_biases: &[f32], buf_in: &[f32], buf_out: &mut [f32]
+      num_input_nodes: usize,
+      num_output_nodes: usize,
+      layer_weights: &[f32],
+      layer_biases: &[f32],
+      buf_in: &[f32],
+      buf_out: &mut [f32],
+      activation_function: fn(f32) -> f32,
     ) {
       for node_out in 0_usize..num_output_nodes {
         let start = node_out * num_input_nodes;
         let end = start + num_input_nodes;
         let weights = &layer_weights[start..end];
         let bias = layer_biases[node_out];
-        let val = bias + {
+
+        let output = bias + {
           weights
             .iter()
             .zip(buf_in.iter())
-            .fold(0f32, |acc, (w, b)| acc + w * b)
+            .fold(0f32, |sum, (weight, node)| sum + weight * node)
         };
 
-        // ReLU as activation function
-        let val = val.max(0_f32);
-
-        buf_out[node_out] = val;
+        buf_out[node_out] = activation_function(output);
       }
     }
 
-    for ((biases, &num_output_nodes), layer_weights) in self.biases
-      [..num_layers]
+    for (
+      ((layer_weights, layer_biases), &num_output_nodes),
+      &activation_function,
+    ) in self.weights[..num_layers]
       .iter()
+      .zip(self.biases[..num_layers].iter())
       .zip(self.num_hidden_nodes[..num_layers].iter())
-      .zip(self.weights[..num_layers].iter())
+      .zip(self.activation_functions[..num_layers].iter())
     {
       // Bias is counted as one node towards the maximum
       assert!(num_output_nodes < NeuralNetwork::MAX_NODES_PER_LAYER);
 
       propagate(
-        num_output_nodes,
         num_input_nodes,
+        num_output_nodes,
         layer_weights,
-        biases,
+        layer_biases,
         buf_in,
-        buf_out
+        buf_out,
+        activation_function,
       );
-
-      use std::mem;
 
       num_input_nodes = num_output_nodes;
       mem::swap(&mut buf_in, &mut buf_out);
@@ -93,16 +110,17 @@ impl NeuralNetwork {
     let mut output = vec![0f32; self.num_outputs];
 
     // Final output layer
-    let biases = &self.biases[num_layers];
+    let layer_biases = &self.biases[num_layers];
     let layer_weights = &self.weights[num_layers];
 
     propagate(
-      self.num_outputs,
       num_input_nodes,
+      self.num_outputs,
       layer_weights,
-      biases,
+      layer_biases,
       buf_in,
-      &mut output
+      &mut output,
+      self.activation_functions[num_layers],
     );
 
     output
@@ -121,8 +139,9 @@ pub mod test {
   extern {
     #[cfg(test)]
     fn av1_nn_predict(
-      features: *const libc::c_float, nn_config: *const NN_CONFIG,
-      output: *mut libc::c_float
+      features: *const libc::c_float,
+      nn_config: *const NN_CONFIG,
+      output: *mut libc::c_float,
     );
   }
 
@@ -137,7 +156,7 @@ pub mod test {
     // Weight parameters, indexed by layer.
     weights: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
     // Bias parameters, indexed by layer.
-    bias: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1]
+    bias: [*const libc::c_float; NeuralNetwork::MAX_HIDDEN_LAYERS + 1],
   }
 
   impl NN_CONFIG {
@@ -164,13 +183,15 @@ pub mod test {
         num_hidden_layers: config.num_hidden_layers as libc::c_int,
         num_hidden_nodes,
         weights,
-        bias: biases
+        bias: biases,
       }
     }
   }
 
   fn setup_pred(
-    ra: &mut ChaChaRng, num_inputs: usize, num_outputs: usize
+    ra: &mut ChaChaRng,
+    num_inputs: usize,
+    num_outputs: usize,
   ) -> (Vec<f32>, Vec<f32>) {
     let input: Vec<f32> = (0..num_inputs).map(|_| ra.gen()).collect();
     let output = vec![0f32; num_outputs];
@@ -179,7 +200,9 @@ pub mod test {
   }
 
   fn pred_aom(
-    input: &Vec<f32>, nn_config: &NeuralNetwork, output: &mut Vec<f32>
+    input: &Vec<f32>,
+    nn_config: &NeuralNetwork,
+    output: &mut Vec<f32>,
   ) {
     let config = NN_CONFIG::new(&nn_config);
 
@@ -224,7 +247,20 @@ pub mod test {
       num_hidden_layers: 4,
       num_hidden_nodes: &[12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
       weights: unsafe { &WEIGHTS },
-      biases: unsafe { &BIASES }
+      biases: unsafe { &BIASES },
+      activation_functions: &[
+        RECTIFIER_FUNCTION,
+        RECTIFIER_FUNCTION,
+        RECTIFIER_FUNCTION,
+        RECTIFIER_FUNCTION,
+        IDENTITY_FUNCTION,
+        NULLIFIER_FUNCTION,
+        NULLIFIER_FUNCTION,
+        NULLIFIER_FUNCTION,
+        NULLIFIER_FUNCTION,
+        NULLIFIER_FUNCTION,
+        NULLIFIER_FUNCTION,
+      ],
     };
 
     pred_aom(&input, &config.clone(), &mut o1);

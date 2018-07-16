@@ -322,6 +322,19 @@ fn setup_pred_nn(
     num_hidden_nodes: &[12, 8, 6, 4, 0, 0, 0, 0, 0, 0],
     weights: unsafe { &WEIGHTS },
     biases: unsafe { &BIASES },
+    activation_functions: &[
+      RECTIFIER_FUNCTION,
+      RECTIFIER_FUNCTION,
+      RECTIFIER_FUNCTION,
+      RECTIFIER_FUNCTION,
+      IDENTITY_FUNCTION,
+      NULLIFIER_FUNCTION,
+      NULLIFIER_FUNCTION,
+      NULLIFIER_FUNCTION,
+      NULLIFIER_FUNCTION,
+      NULLIFIER_FUNCTION,
+      NULLIFIER_FUNCTION,
+    ],
   };
 
   let output = vec![0f32; config.num_outputs];
