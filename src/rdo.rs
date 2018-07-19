@@ -400,6 +400,8 @@ pub fn rdo_partition_decision(
   bo: &BlockOffset,
   cached_block: &RDOOutput,
 ) -> RDOOutput {
+  model_rd_with_dnn(fi, fs, bsize, bo, 0);
+
   let max_rd = std::f64::MAX;
 
   let mut best_partition = cached_block.part_type;
@@ -560,6 +562,10 @@ fn model_rd_with_dnn(
       vert_corr,
     ];
 
+    for i in 0..11 {
+      println!("Feature #{}: {}", i, features[i]);
+    }
+
     let dist_by_sse_norm_f = DISTORTION_MODEL.predict(&features)[0];
     let rate_f = RATE_MODEL.predict(&features)[0];
     let dist_f = dist_by_sse_norm_f * (1f32 + sse_norm);
@@ -627,7 +633,7 @@ fn get_horver_correlation(
 
   let (mut hcorr, mut vcorr) = (1f32, 1f32);
 
-  let num_r = 1f32 / num as f32;
+  let num_r = 1f32 / (num as f32);
   let (mut x_sum, mut y_sum, mut z_sum) = (0i64, 0i64, 0i64);
   let (mut x2_sum, mut y2_sum, mut z2_sum) = (0i64, 0i64, 0i64);
   let (mut xy_sum, mut xz_sum) = (0i64, 0i64);
@@ -659,11 +665,11 @@ fn get_horver_correlation(
 
   if x_var_n > 0f32 {
     if y_var_n > 0f32 {
-      hcorr = ((xy_var_n as f32) / ((x_var_n * y_var_n) as f32).sqrt()).abs();
+      hcorr = (xy_var_n / (x_var_n * y_var_n).sqrt()).max(0f32);
     }
 
     if z_var_n > 0f32 {
-      vcorr = ((xz_var_n as f32) / ((x_var_n * z_var_n) as f32).sqrt()).abs();
+      vcorr = (xz_var_n / (x_var_n * z_var_n).sqrt()).max(0f32);
     }
   }
 

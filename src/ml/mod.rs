@@ -13,7 +13,7 @@ use std::mem;
 pub mod nn_models;
 
 pub const RECTIFIER_FUNCTION: fn(f32) -> f32 =
-  |value: f32| -> f32 { value.abs() };
+  |value: f32| -> f32 { value.max(0f32) };
 pub const IDENTITY_FUNCTION: fn(f32) -> f32 = |value: f32| -> f32 { value };
 pub const NULLIFIER_FUNCTION: fn(f32) -> f32 = |_: f32| -> f32 { 0f32 };
 
