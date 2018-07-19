@@ -45,11 +45,11 @@ impl NeuralNetwork {
       [0_f32; NeuralNetwork::MAX_NODES_PER_LAYER],
     );
 
-    let mut buf_in = &mut buffer.0[..num_input_nodes];
-    let mut buf_out = &mut buffer.1[..num_input_nodes];
+    let mut buf_in = &mut buffer.0[..];
+    let mut buf_out = &mut buffer.1[..];
 
     // Copy input vector to buffer
-    buf_in.copy_from_slice(&input[..num_input_nodes]);
+    buf_in[..num_input_nodes].copy_from_slice(&input[..num_input_nodes]);
 
     // Propagate hidden layers
     let num_layers = self.num_hidden_layers;
@@ -84,8 +84,7 @@ impl NeuralNetwork {
     for (
       ((layer_weights, layer_biases), &num_output_nodes),
       &activation_function,
-    ) in self.weights[..num_layers]
-      .iter()
+    ) in self.weights[..num_layers].iter()
       .zip(self.biases[..num_layers].iter())
       .zip(self.num_hidden_nodes[..num_layers].iter())
       .zip(self.activation_functions[..num_layers].iter())
