@@ -514,7 +514,7 @@ fn model_rd_with_dnn(
   let num_samples = 1 << log_numpels;
 
   let dequant_shift = 3; // bit depth - 5
-  let q_step = dc_q(fi.qindex) >> dequant_shift; // may be valid only for luma
+  let q_step = dc_q(fi.config.quantizer) >> dequant_shift; // may be valid only for luma
 
   let (bw, bh) = (bsize.width(), bsize.height());
 
@@ -535,9 +535,10 @@ fn model_rd_with_dnn(
       bw,
       bh,
     );
+
     let variance = sse_norm - mean * mean;
     let q_sqr = (q_step * q_step) as f32;
-    let q_sqr_by_variance = q_sqr / (variance + 1f32);
+    let q_sqr_by_sse_norm = q_sqr / (sse_norm + 1f32);
     let (hor_corr, vert_corr) = get_horver_correlation(
       &fs.input.planes[plane].slice(&po),
       &fs.rec.planes[plane].slice(&po),
@@ -548,9 +549,8 @@ fn model_rd_with_dnn(
     let features: Vec<f32> = vec![
       hor_corr,
       log_numpels as f32,
-      mean,
       q_sqr,
-      q_sqr_by_variance,
+      q_sqr_by_sse_norm,
       sse_norm_arr[0],
       sse_norm_arr[1],
       sse_norm_arr[2],
@@ -560,10 +560,20 @@ fn model_rd_with_dnn(
       vert_corr,
     ];
 
-    let dist_f = DISTORTION_MODEL.predict(&features)[0];
+    let dist_by_sse_norm_f = DISTORTION_MODEL.predict(&features)[0];
     let rate_f = RATE_MODEL.predict(&features)[0];
+    let dist_f = dist_by_sse_norm_f * (1f32 + sse_norm);
+
     rate = ((rate_f * (1 << log_numpels) as f32) + 0.5).abs();
     distortion = ((dist_f * (1 << log_numpels) as f32) + 0.5).abs();
+
+    // TODO: check if skip is better
+    /*if (RDCOST(x->rdmult, rate_i, dist_i) >= RDCOST(x->rdmult, 0, (sse << 4))) {
+      distortion = sse << 4;
+      rate = 0;
+    } else if (rate == 0) {
+      distortion = sse << 4;
+    }*/
   }
 
   (rate, distortion, sse)
