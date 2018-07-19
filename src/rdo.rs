@@ -14,6 +14,7 @@
 use context::*;
 use ec::OD_BITRES;
 use encode_block;
+use ml::nn_models::*;
 use partition::*;
 use plane::*;
 use predict::{RAV1E_INTRA_MODES, RAV1E_INTRA_MODES_MINIMAL};
@@ -32,7 +33,7 @@ use Tune;
 pub struct RDOOutput {
   pub rd_cost: f64,
   pub part_type: PartitionType,
-  pub part_modes: Vec<RDOPartitionOutput>
+  pub part_modes: Vec<RDOPartitionOutput>,
 }
 
 #[derive(Clone)]
@@ -41,7 +42,7 @@ pub struct RDOPartitionOutput {
   pub bo: BlockOffset,
   pub pred_mode_luma: PredictionMode,
   pub pred_mode_chroma: PredictionMode,
-  pub skip: bool
+  pub skip: bool,
 }
 
 #[allow(unused)]
@@ -92,20 +93,57 @@ fn cdef_dist_wxh(
 // Sum of Squared Error for a wxh block
 fn sse_wxh(src1: &PlaneSlice, src2: &PlaneSlice, w: usize, h: usize) -> u64 {
   let mut sse: u64 = 0;
+
   for j in 0..h {
     for i in 0..w {
       let dist = (src1.p(i, j) as i16 - src2.p(i, j) as i16) as i64;
       sse += (dist * dist) as u64;
     }
   }
+
   sse
+}
+
+// Normalized SSE
+fn sse_norm_wxh(
+  src1: &PlaneSlice,
+  src2: &PlaneSlice,
+  w: usize,
+  h: usize,
+) -> f32 {
+  (sse_wxh(src1, src2, w, h) as f32) / ((w * h) as f32)
+}
+
+// Mean error
+fn mean_error_wxh(
+  src1: &PlaneSlice,
+  src2: &PlaneSlice,
+  w: usize,
+  h: usize,
+) -> f32 {
+  let mut error: u64 = 0;
+
+  for j in 0..h {
+    for i in 0..w {
+      error += (src1.p(i, j) as i16 - src2.p(i, j) as i16).abs() as u64;
+    }
+  }
+
+  (error as f32) / ((w * h) as f32)
 }
 
 // Compute the rate-distortion cost for an encode
 fn compute_rd_cost(
-  fi: &FrameInvariants, fs: &FrameState, w_y: usize, h_y: usize, w_uv: usize,
-  h_uv: usize, partition_start_x: usize, partition_start_y: usize,
-  bo: &BlockOffset, bit_cost: u32
+  fi: &FrameInvariants,
+  fs: &FrameState,
+  w_y: usize,
+  h_y: usize,
+  w_uv: usize,
+  h_uv: usize,
+  partition_start_x: usize,
+  partition_start_y: usize,
+  bo: &BlockOffset,
+  bit_cost: u32,
 ) -> f64 {
   let q = dc_q(fi.config.quantizer) as f64;
 
@@ -142,14 +180,14 @@ fn compute_rd_cost(
       let sb_offset = bo.sb_offset().plane_offset(&fs.input.planes[p].cfg);
       let po = PlaneOffset {
         x: sb_offset.x + partition_start_x,
-        y: sb_offset.y + partition_start_y
+        y: sb_offset.y + partition_start_y,
       };
 
       distortion += sse_wxh(
         &fs.input.planes[p].slice(&po),
         &fs.rec.planes[p].slice(&po),
         w_uv,
-        h_uv
+        h_uv,
       );
     }
   };
@@ -162,8 +200,11 @@ fn compute_rd_cost(
 
 // RDO-based mode decision
 pub fn rdo_mode_decision(
-  fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,
-  bsize: BlockSize, bo: &BlockOffset
+  fi: &FrameInvariants,
+  fs: &mut FrameState,
+  cw: &mut ContextWriter,
+  bsize: BlockSize,
+  bo: &BlockOffset,
 ) -> RDOOutput {
   let mut best_mode_luma = PredictionMode::DC_PRED;
   let mut best_mode_chroma = PredictionMode::DC_PRED;
@@ -228,7 +269,7 @@ pub fn rdo_mode_decision(
             partition_start_x,
             partition_start_y,
             bo,
-            cost
+            cost,
           );
 
           if rd < best_rd {
@@ -254,7 +295,7 @@ pub fn rdo_mode_decision(
           partition_start_x,
           partition_start_y,
           bo,
-          cost
+          cost,
         );
 
         if rd < best_rd {
@@ -279,8 +320,8 @@ pub fn rdo_mode_decision(
       pred_mode_luma: best_mode_luma,
       pred_mode_chroma: best_mode_chroma,
       rd_cost: best_rd,
-      skip: best_skip
-    }]
+      skip: best_skip,
+    }],
   }
 }
 
@@ -334,7 +375,7 @@ pub fn rdo_tx_type_decision(
       partition_start_x,
       partition_start_y,
       bo,
-      cost
+      cost,
     );
 
     if rd < best_rd {
@@ -352,8 +393,12 @@ pub fn rdo_tx_type_decision(
 
 // RDO-based single level partitioning decision
 pub fn rdo_partition_decision(
-  fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,
-  bsize: BlockSize, bo: &BlockOffset, cached_block: &RDOOutput
+  fi: &FrameInvariants,
+  fs: &mut FrameState,
+  cw: &mut ContextWriter,
+  bsize: BlockSize,
+  bo: &BlockOffset,
+  cached_block: &RDOOutput,
 ) -> RDOOutput {
   let max_rd = std::f64::MAX;
 
@@ -441,6 +486,176 @@ pub fn rdo_partition_decision(
   RDOOutput {
     rd_cost: best_rd,
     part_type: best_partition,
-    part_modes: best_pred_modes
+    part_modes: best_pred_modes,
   }
+}
+
+// TODO: clean up and comment
+fn model_rd_with_dnn(
+  fi: &FrameInvariants,
+  fs: &FrameState,
+  bsize: BlockSize,
+  bo: &BlockOffset,
+  plane: usize,
+) -> (f32, f32, f32) {
+  // TODO: fix chroma implementation
+  if plane > 0 {
+    unimplemented!();
+  }
+
+  let (mut rate, mut distortion) = (0f32, 0f32);
+
+  let PlaneConfig { xdec, ydec, .. } = fs.input.planes[plane].cfg;
+
+  let plane_bsize = get_plane_block_size(bsize, xdec, ydec);
+  let po = bo.plane_offset(&fs.input.planes[plane].cfg);
+
+  let log_numpels = num_pels_log2_lookup[plane_bsize as usize];
+  let num_samples = 1 << log_numpels;
+
+  let dequant_shift = 3; // bit depth - 5
+  let q_step = dc_q(fi.qindex) >> dequant_shift; // may be valid only for luma
+
+  let (bw, bh) = (bsize.width(), bsize.height());
+
+  let sse = sse_wxh(
+    &fs.input.planes[plane].slice(&po),
+    &fs.rec.planes[plane].slice(&po),
+    bw,
+    bh,
+  ) as f32;
+
+  if sse > 0f32 {
+    let sse_norm = sse / num_samples as f32;
+
+    let sse_norm_arr = get_2x2_normalized_sses(fs, bsize, bo, plane);
+    let mean = mean_error_wxh(
+      &fs.input.planes[plane].slice(&po),
+      &fs.rec.planes[plane].slice(&po),
+      bw,
+      bh,
+    );
+    let variance = sse_norm - mean * mean;
+    let q_sqr = (q_step * q_step) as f32;
+    let q_sqr_by_variance = q_sqr / (variance + 1f32);
+    let (hor_corr, vert_corr) = get_horver_correlation(
+      &fs.input.planes[plane].slice(&po),
+      &fs.rec.planes[plane].slice(&po),
+      bw,
+      bh,
+    );
+
+    let features: Vec<f32> = vec![
+      hor_corr,
+      log_numpels as f32,
+      mean,
+      q_sqr,
+      q_sqr_by_variance,
+      sse_norm_arr[0],
+      sse_norm_arr[1],
+      sse_norm_arr[2],
+      sse_norm_arr[3],
+      sse_norm,
+      variance,
+      vert_corr,
+    ];
+
+    let dist_f = DISTORTION_MODEL.predict(&features)[0];
+    let rate_f = RATE_MODEL.predict(&features)[0];
+    rate = ((rate_f * (1 << log_numpels) as f32) + 0.5).abs();
+    distortion = ((dist_f * (1 << log_numpels) as f32) + 0.5).abs();
+  }
+
+  (rate, distortion, sse)
+}
+
+// TODO: clean up and comment
+fn get_2x2_normalized_sses(
+  fs: &FrameState,
+  tx_bsize: BlockSize,
+  bo: &BlockOffset,
+  plane: usize,
+) -> [f32; 2 * 2] {
+  if plane > 0 {
+    unimplemented!();
+  }
+
+  let mut sse_norm_arr = [0f32; 2 * 2];
+
+  let half_width = tx_bsize.width() / 2;
+  let half_height = tx_bsize.height() / 2;
+
+  for row in 0..2 {
+    for col in 0..2 {
+      let offset = bo.plane_offset(&fs.input.planes[plane].cfg);
+      let po = PlaneOffset {
+        x: offset.x + col * half_width,
+        y: offset.y + row * half_height,
+      };
+
+      sse_norm_arr[row * 2 + col] = sse_norm_wxh(
+        &fs.input.planes[plane].slice(&po),
+        &fs.rec.planes[plane].slice(&po),
+        half_width,
+        half_height,
+      );
+    }
+  }
+
+  sse_norm_arr
+}
+
+// TODO: clean up and comment
+fn get_horver_correlation(
+  src1: &PlaneSlice,
+  src2: &PlaneSlice,
+  w: usize,
+  h: usize,
+) -> (f32, f32) {
+  let num = (h - 1) * (w - 1);
+  assert!(num > 0);
+
+  let (mut hcorr, mut vcorr) = (1f32, 1f32);
+
+  let num_r = 1f32 / num as f32;
+  let (mut x_sum, mut y_sum, mut z_sum) = (0i64, 0i64, 0i64);
+  let (mut x2_sum, mut y2_sum, mut z2_sum) = (0i64, 0i64, 0i64);
+  let (mut xy_sum, mut xz_sum) = (0i64, 0i64);
+
+  for i in 1..h {
+    for j in 1..w {
+      let x = (src1.p(i, j) as i16 - src2.p(i, j) as i16) as i64;
+      let y = (src1.p(i, j - 1) as i16 - src2.p(i, j - 1) as i16) as i64;
+      let z = (src1.p(i - 1, j) as i16 - src2.p(i - 1, j) as i16) as i64;
+
+      x_sum += x;
+      y_sum += y;
+      z_sum += z;
+
+      x2_sum += x * x;
+      y2_sum += y * y;
+      z2_sum += z * z;
+
+      xy_sum += x * y;
+      xz_sum += x * z;
+    }
+  }
+
+  let x_var_n = (x2_sum - (x_sum * x_sum)) as f32 * num_r;
+  let y_var_n = (y2_sum - (y_sum * y_sum)) as f32 * num_r;
+  let z_var_n = (z2_sum - (z_sum * z_sum)) as f32 * num_r;
+  let xy_var_n = (xy_sum - (x_sum * y_sum)) as f32 * num_r;
+  let xz_var_n = (xz_sum - (x_sum * z_sum)) as f32 * num_r;
+
+  if x_var_n > 0f32 {
+    if y_var_n > 0f32 {
+      hcorr = ((xy_var_n as f32) / ((x_var_n * y_var_n) as f32).sqrt()).abs();
+    }
+
+    if z_var_n > 0f32 {
+      vcorr = ((xz_var_n as f32) / ((x_var_n * z_var_n) as f32).sqrt()).abs();
+    }
+  }
+
+  (hcorr, vcorr)
 }
