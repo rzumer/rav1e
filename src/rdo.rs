@@ -231,7 +231,7 @@ pub fn rdo_mode_decision(
   let partition_start_x = (bo.x & LOCAL_BLOCK_MASK) >> xdec << MI_SIZE_LOG2;
   let partition_start_y = (bo.y & LOCAL_BLOCK_MASK) >> ydec << MI_SIZE_LOG2;
 
-  for &skip in &[false, true] {
+  for &skip in &[false] {//, true] { using true to signal RNN first pass
     // Don't test skipped blocks at higher speed levels
     if fi.config.speed > 1 && skip {
       continue;
@@ -253,7 +253,21 @@ pub fn rdo_mode_decision(
         break;
       }
 
-      if is_chroma_block && fi.config.speed <= 3 {
+      if fi.use_nn_prediction {
+        encode_block(fi, fs, cw, luma_mode, luma_mode, bsize, bo, true);
+
+        let rd = model_rd_with_dnn(fi, fs, bsize, bo, 0);
+
+        if rd < best_rd {
+          best_rd = rd;
+          best_mode_luma = luma_mode;
+          best_mode_chroma = luma_mode;
+          best_skip = skip;
+        }
+
+        cw.rollback(&checkpoint);
+      }
+      else if is_chroma_block && fi.config.speed <= 3 {
         // Find the best chroma prediction mode for the current luma prediction mode
         for &chroma_mode in RAV1E_INTRA_MODES {
           encode_block(fi, fs, cw, luma_mode, chroma_mode, bsize, bo, skip);
@@ -499,13 +513,13 @@ fn model_rd_with_dnn(
   bsize: BlockSize,
   bo: &BlockOffset,
   plane: usize,
-) -> (f32, f32, f32) {
+) -> f64 {
   // TODO: fix chroma implementation
   if plane > 0 {
     unimplemented!();
   }
 
-  let (mut rate, mut distortion) = (0f32, 0f32);
+  let (mut rate, mut distortion) = (0f64, 0f64);
 
   let PlaneConfig { xdec, ydec, .. } = fs.input.planes[plane].cfg;
 
@@ -516,7 +530,8 @@ fn model_rd_with_dnn(
   let num_samples = 1 << log_numpels;
 
   let dequant_shift = 3; // bit depth - 5
-  let q_step = dc_q(fi.config.quantizer) >> dequant_shift; // may be valid only for luma
+  let q = dc_q(fi.qindex);
+  let q_step = q >> dequant_shift; // may be valid only for luma
 
   let (bw, bh) = (bsize.width(), bsize.height());
 
@@ -567,11 +582,11 @@ fn model_rd_with_dnn(
     }
 
     let dist_by_sse_norm_f = DISTORTION_MODEL.predict(&features)[0];
-    let rate_f = RATE_MODEL.predict(&features)[0];
-    let dist_f = dist_by_sse_norm_f * (1f32 + sse_norm);
+    let rate_f = RATE_MODEL.predict(&features)[0] as f64;
+    let dist_f = dist_by_sse_norm_f as f64 * (1f64 + sse_norm as f64);
 
-    rate = ((rate_f * (1 << log_numpels) as f32) + 0.5).abs();
-    distortion = ((dist_f * (1 << log_numpels) as f32) + 0.5).abs();
+    rate = ((rate_f * (1 << log_numpels) as f64) + 0.5).abs();
+    distortion = ((dist_f * (1 << log_numpels) as f64) + 0.5).abs();
 
     // TODO: check if skip is better
     /*if (RDCOST(x->rdmult, rate_i, dist_i) >= RDCOST(x->rdmult, 0, (sse << 4))) {
@@ -581,8 +596,11 @@ fn model_rd_with_dnn(
       distortion = sse << 4;
     }*/
   }
+  
+  println!("R/D/E: {}/{}/{}", rate, distortion, sse);
 
-  (rate, distortion, sse)
+  let lambda = ((q * q) as f64) * std::f64::consts::LN_2 / 6.0;
+  distortion + lambda * rate
 }
 
 // TODO: clean up and comment

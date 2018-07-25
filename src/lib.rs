@@ -288,6 +288,7 @@ pub struct FrameInvariants {
     // after it is decoded.
     pub allow_intrabc: bool,
     pub use_ref_frame_mvs: bool,
+    pub use_nn_prediction: bool,
     pub is_filter_switchable: bool,
     pub is_motion_mode_switchable: bool,
     pub disable_frame_end_update_cdf: bool,
@@ -309,6 +310,7 @@ impl FrameInvariants {
                                  else if config.speed <= 3 { BlockSize::BLOCK_16X16 }
                                  else { BlockSize::BLOCK_32X32 };
         let use_reduced_tx_set = config.speed > 1;
+        let use_nn_prediction = speed <= 1;
 
         FrameInvariants {
             width,
@@ -341,6 +343,7 @@ impl FrameInvariants {
             refresh_frame_flags: 0,
             allow_intrabc: false,
             use_ref_frame_mvs: false,
+            use_nn_prediction: use_nn_prediction,
             is_filter_switchable: false,
             is_motion_mode_switchable: false, // 0: only the SIMPLE motion mode will be used.
             disable_frame_end_update_cdf: true,
@@ -1561,7 +1564,7 @@ fn encode_block(
     // Luma plane transform type decision
     let tx_set = get_tx_set(tx_size, is_inter, fi.use_reduced_tx_set);
 
-    let tx_type = if tx_set > TxSet::TX_SET_DCTONLY && fi.config.speed <= 3 {
+    let tx_type = if tx_set > TxSet::TX_SET_DCTONLY && fi.config.speed <= 3 && !skip {
         // FIXME: there is one redundant transform type decision per encoded block
         rdo_tx_type_decision(fi, fs, cw, luma_mode, bsize, bo, tx_size, tx_set)
     } else {
@@ -1589,7 +1592,7 @@ pub fn write_tx_blocks(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut Conte
             };
 
             let po = tx_bo.plane_offset(&fs.input.planes[0].cfg);
-            encode_tx_block(fi, fs, cw, 0, &tx_bo, luma_mode, tx_size, tx_type, bsize, &po, skip);
+            encode_tx_block(fi, fs, cw, 0, &tx_bo, luma_mode, tx_size, tx_type, bsize, &po, false); //skip, TODO: replace false with skip
         }
     }
 
