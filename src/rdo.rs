@@ -530,7 +530,7 @@ fn model_rd_with_dnn(
   let num_samples = 1 << log_numpels;
 
   let dequant_shift = 3; // bit depth - 5
-  let q = dc_q(fi.qindex);
+  let q = dc_q(fi.config.quantizer);
   let q_step = q >> dequant_shift; // may be valid only for luma
 
   let (bw, bh) = (bsize.width(), bsize.height());

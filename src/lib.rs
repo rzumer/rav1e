@@ -10,9 +10,9 @@
 #![allow(safe_extern_statics)]
 #![cfg_attr(feature = "cargo-clippy", allow(collapsible_if))]
 
+extern crate bitstream_io;
 extern crate backtrace;
 #[macro_use]
-extern crate bitstream_io;
 extern crate clap;
 extern crate libc;
 extern crate rand;
@@ -21,56 +21,56 @@ extern crate y4m;
 #[macro_use]
 extern crate enum_iterator_derive;
 
-use bitstream_io::{BitWriter, BE, LE};
-use clap::{App, Arg};
 use std::fs::File;
 use std::io::prelude::*;
+use bitstream_io::{BE, LE, BitWriter};
+use clap::{App, Arg};
 use std::rc::Rc;
 
 // for benchmarking purpose
-pub mod context;
 pub mod ec;
-pub mod ml;
 pub mod partition;
 pub mod plane;
-pub mod predict;
-pub mod quantize;
-pub mod rdo;
-pub mod cdef;
+pub mod context;
+pub mod ml;
 pub mod transform;
+pub mod quantize;
+pub mod predict;
+pub mod rdo;
 pub mod util;
+pub mod cdef;
 
 use context::*;
-use ec::*;
 use partition::*;
-use plane::*;
-use quantize::*;
-use rdo::*;
-use std::fmt;
 use transform::*;
+use quantize::*;
+use plane::*;
+use rdo::*;
+use ec::*;
+use std::fmt;
 use util::*;
 use cdef::*;
 
 extern {
-  pub fn av1_rtcd();
-  pub fn aom_dsp_rtcd();
+    pub fn av1_rtcd();
+    pub fn aom_dsp_rtcd();
 }
 
 #[derive(Debug)]
 pub struct Frame {
-  pub planes: [Plane; 3],
+    pub planes: [Plane; 3]
 }
 
 impl Frame {
-  pub fn new(width: usize, height: usize) -> Frame {
-    Frame {
-      planes: [
-        Plane::new(width, height, 0, 0),
-        Plane::new(width / 2, height / 2, 1, 1),
-        Plane::new(width / 2, height / 2, 1, 1),
-      ],
+    pub fn new(width: usize, height:usize) -> Frame {
+        Frame {
+            planes: [
+                Plane::new(width, height, 0, 0),
+                Plane::new(width/2, height/2, 1, 1),
+                Plane::new(width/2, height/2, 1, 1)
+            ]
+        }
     }
-  }
 }
 
 const MAX_NUM_TEMPORAL_LAYERS: usize = 8;
@@ -223,33 +223,32 @@ impl FrameState {
             qc: Default::default(),
         }
     }
-  }
 }
 
 trait Fixed {
-  fn floor_log2(&self, n: usize) -> usize;
-  fn ceil_log2(&self, n: usize) -> usize;
-  fn align_power_of_two(&self, n: usize) -> usize;
-  fn align_power_of_two_and_shift(&self, n: usize) -> usize;
+    fn floor_log2(&self, n: usize) -> usize;
+    fn ceil_log2(&self, n: usize) -> usize;
+    fn align_power_of_two(&self, n: usize) -> usize;
+    fn align_power_of_two_and_shift(&self, n: usize) -> usize;
 }
 
 impl Fixed for usize {
-  #[inline]
-  fn floor_log2(&self, n: usize) -> usize {
-    self & !((1 << n) - 1)
-  }
-  #[inline]
-  fn ceil_log2(&self, n: usize) -> usize {
-    (self + (1 << n) - 1).floor_log2(n)
-  }
-  #[inline]
-  fn align_power_of_two(&self, n: usize) -> usize {
-    self.ceil_log2(n)
-  }
-  #[inline]
-  fn align_power_of_two_and_shift(&self, n: usize) -> usize {
-    (self + (1 << n) - 1) >> n
-  }
+    #[inline]
+    fn floor_log2(&self, n: usize) -> usize {
+        self & !((1 << n) - 1)
+    }
+    #[inline]
+    fn ceil_log2(&self, n: usize) -> usize {
+        (self + (1 << n) - 1).floor_log2(n)
+    }
+    #[inline]
+    fn align_power_of_two(&self, n: usize) -> usize {
+        self.ceil_log2(n)
+    }
+    #[inline]
+    fn align_power_of_two_and_shift(&self, n: usize) -> usize {
+        (self + (1 << n) - 1) >> n
+    }
 }
 
 // Frame Invariants are invariant inside a frame
@@ -310,7 +309,7 @@ impl FrameInvariants {
                                  else if config.speed <= 3 { BlockSize::BLOCK_16X16 }
                                  else { BlockSize::BLOCK_32X32 };
         let use_reduced_tx_set = config.speed > 1;
-        let use_nn_prediction = speed <= 1;
+        let use_nn_prediction = config.speed <= 1;
 
         FrameInvariants {
             width,
@@ -363,13 +362,12 @@ impl FrameInvariants {
             qc: Default::default(),
         }
     }
-  }
 }
 
-impl fmt::Display for FrameInvariants {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    write!(f, "Frame {} - {}", self.number, self.frame_type)
-  }
+impl fmt::Display for FrameInvariants{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Frame {} - {}", self.number, self.frame_type)
+    }
 }
 
 #[allow(dead_code,non_camel_case_types)]
@@ -383,8 +381,8 @@ pub enum FrameType {
 
 //const REFERENCE_MODES: usize = 3;
 
-#[allow(dead_code, non_camel_case_types)]
-#[derive(Debug, PartialEq, EnumIterator)]
+#[allow(dead_code,non_camel_case_types)]
+#[derive(Debug,PartialEq,EnumIterator)]
 pub enum ReferenceMode {
   SINGLE = 0,
   COMPOUND = 1,
@@ -427,7 +425,6 @@ impl fmt::Display for FrameType{
             FrameType::SWITCH => write!(f, "Switching frame"),
         }
     }
-  }
 }
 
 pub struct EncoderIO {
@@ -522,34 +519,27 @@ impl EncoderConfig {
 
         (io, config)
     }
-  }
 }
 
-pub fn write_ivf_header(
-  output_file: &mut Write,
-  width: usize,
-  height: usize,
-  num: usize,
-  den: usize,
-) {
-  let mut bw = BitWriter::<LE>::new(output_file);
-  bw.write_bytes(b"DKIF").unwrap();
-  bw.write(16, 0).unwrap(); // version
-  bw.write(16, 32).unwrap(); // version
-  bw.write_bytes(b"AV01").unwrap();
-  bw.write(16, width as u16).unwrap();
-  bw.write(16, height as u16).unwrap();
-  bw.write(32, num as u32).unwrap();
-  bw.write(32, den as u32).unwrap();
-  bw.write(32, 0).unwrap();
-  bw.write(32, 0).unwrap();
+pub fn write_ivf_header(output_file: &mut Write, width: usize, height: usize, num: usize, den: usize) {
+    let mut bw = BitWriter::<LE>::new(output_file);
+    bw.write_bytes(b"DKIF").unwrap();
+    bw.write(16, 0).unwrap(); // version
+    bw.write(16, 32).unwrap(); // version
+    bw.write_bytes(b"AV01").unwrap();
+    bw.write(16, width as u16).unwrap();
+    bw.write(16, height as u16).unwrap();
+    bw.write(32, num as u32).unwrap();
+    bw.write(32, den as u32).unwrap();
+    bw.write(32, 0).unwrap();
+    bw.write(32, 0).unwrap();
 }
 
 pub fn write_ivf_frame(output_file: &mut Write, pts: u64, data: &[u8]) {
-  let mut bw = BitWriter::<LE>::new(output_file);
-  bw.write(32, data.len() as u32).unwrap();
-  bw.write(64, pts).unwrap();
-  bw.write_bytes(data).unwrap();
+    let mut bw = BitWriter::<LE>::new(output_file);
+    bw.write(32, data.len() as u32).unwrap();
+    bw.write(64, pts).unwrap();
+    bw.write_bytes(data).unwrap();
 }
 
 trait UncompressedHeader {
@@ -1120,8 +1110,6 @@ impl<'a> UncompressedHeader for BitWriter<'a, BE> {
         }
         Ok(())
     }
-    Ok(())
-  }
 }
 
 #[allow(non_camel_case_types)]
@@ -1324,12 +1312,7 @@ fn write_uncompressed_header(packet: &mut Write,
             }
         }
     };
-  };
-  bw.write_bit(fi.error_resilient)?; // error resilient
 
-  if fi.frame_type == FrameType::KEY || fi.intra_only {
-    bw.write_sequence_header(fi)?;
-  }
 
     bw.write(3,0x0)?; // frame context
     bw.write_loop_filter()?;
@@ -1344,130 +1327,72 @@ fn write_uncompressed_header(packet: &mut Write,
     bw.write(6,0)?; // no y, u or v loop restoration
     bw.write_bit(false)?; // tx mode select
 
-  bw.write_bit(false)?; // no override frame size
+    //fi.reference_mode = ReferenceMode::SINGLE;
 
-  if fi.frame_type == FrameType::KEY {
-    bw.write_bitdepth_colorspace_sampling()?;
-    bw.write(1, 0)?; // separate uv delta q
-    bw.write_frame_setup()?;
-  } else {
-    // Inter frame info goes here
-    if fi.intra_only {
-      bw.write_bitdepth_colorspace_sampling()?;
-      bw.write(1, 0)?; // separate uv delta q
-      bw.write(8, 0)?; // refresh_frame_flags
-      bw.write_frame_setup()?;
-    } else {
-      bw.write(8, 0)?; // refresh_frame_flags
-                       // TODO: More Inter frame info goes here
-      for _ in 0..7 {
-        bw.write(3, 0)?; // dummy ref_frame = 0 until real MC happens
-      }
-      bw.write_frame_setup()?;
-      bw.write_bit(fi.allow_high_precision_mv)?;
-      bw.write_bit(false)?; // frame_interp_filter is NOT switchable
-      bw.write(2, 0)?; // EIGHTTAP_REGULAR
-      if !fi.intra_only && !fi.error_resilient {
-        bw.write_bit(false)?; // do not use_ref_frame_mvs
-      }
+    if fi.reference_mode != ReferenceMode::SINGLE {
+        // setup_compound_reference_mode();
     }
-  };
 
-  bw.write(3, 0x0)?; // frame context
-  bw.write_loop_filter()?;
-  bw.write(8, fi.qindex as u8)?; // qindex
-  bw.write_bit(false)?; // y dc delta q
-  bw.write_bit(false)?; // uv dc delta q
-  bw.write_bit(false)?; // uv ac delta q
-  bw.write_bit(false)?; // no qm
-  bw.write_bit(false)?; // segmentation off
-  bw.write_bit(false)?; // no delta q
-  bw.write_cdef()?;
-  bw.write(6, 0)?; // no y, u or v loop restoration
-  bw.write_bit(false)?; // tx mode select
+    if !fi.intra_only {
+        bw.write_bit(false)?; } // do not use inter_intra
+    if !fi.intra_only && fi.reference_mode != ReferenceMode::SINGLE {
+        bw.write_bit(false)?; } // do not allow_masked_compound
 
-  //fi.reference_mode = ReferenceMode::SINGLE;
+    bw.write_bit(fi.use_reduced_tx_set)?; // reduced tx
 
-  if fi.reference_mode != ReferenceMode::SINGLE {
-    // setup_compound_reference_mode();
-  }
-
-  if !fi.intra_only {
-    bw.write_bit(false)?;
-  } // do not use inter_intra
-  if !fi.intra_only && fi.reference_mode != ReferenceMode::SINGLE {
-    bw.write_bit(false)?;
-  } // do not allow_masked_compound
-
-  bw.write_bit(fi.use_reduced_tx_set)?; // reduced tx
-
-  if !fi.intra_only {
-    for i in LAST_FRAME..ALTREF_FRAME + 1 {
-      let mode = fi.globalmv_transformation_type[i];
-      bw.write_bit(mode != GlobalMVMode::IDENTITY)?;
-      if mode != GlobalMVMode::IDENTITY {
-        bw.write_bit(mode == GlobalMVMode::ROTZOOM)?;
-        if mode != GlobalMVMode::ROTZOOM {
-          bw.write_bit(mode == GlobalMVMode::TRANSLATION)?;
+    if !fi.intra_only {
+        for i in LAST_FRAME..ALTREF_FRAME+1 {
+            let mode = fi.globalmv_transformation_type[i];
+            bw.write_bit(mode != GlobalMVMode::IDENTITY)?;
+            if mode != GlobalMVMode::IDENTITY {
+                bw.write_bit(mode == GlobalMVMode::ROTZOOM)?;
+                if mode != GlobalMVMode::ROTZOOM {
+                    bw.write_bit(mode == GlobalMVMode::TRANSLATION)?;
+                }
+            }
+            match mode {
+                GlobalMVMode::IDENTITY => { /* Nothing to do */ }
+                GlobalMVMode::TRANSLATION => {
+                    let mv_x = 0;
+                    let mv_x_ref = 0;
+                    let mv_y = 0;
+                    let mv_y_ref = 0;
+                    let bits = 12 - 6 + 3 - !fi.allow_high_precision_mv as u8;
+                    let bits_diff = 12 - 3 + fi.allow_high_precision_mv as u8;
+                    BCodeWriter::write_s_refsubexpfin(&mut bw, (1 << bits) + 1,
+                                                      3, mv_x_ref >> bits_diff,
+                                                      mv_x >> bits_diff)?;
+                    BCodeWriter::write_s_refsubexpfin(&mut bw, (1 << bits) + 1,
+                                                      3, mv_y_ref >> bits_diff,
+                                                      mv_y >> bits_diff)?;
+                }
+                GlobalMVMode::ROTZOOM => unimplemented!(),
+                GlobalMVMode::AFFINE => unimplemented!(),
+            };
         }
-      }
-      match mode {
-        GlobalMVMode::IDENTITY => { /* Nothing to do */ }
-        GlobalMVMode::TRANSLATION => {
-          let mv_x = 0;
-          let mv_x_ref = 0;
-          let mv_y = 0;
-          let mv_y_ref = 0;
-          let bits = 12 - 6 + 3 - !fi.allow_high_precision_mv as u8;
-          let bits_diff = 12 - 3 + fi.allow_high_precision_mv as u8;
-          BCodeWriter::write_s_refsubexpfin(
-            &mut bw,
-            (1 << bits) + 1,
-            3,
-            mv_x_ref >> bits_diff,
-            mv_x >> bits_diff,
-          )?;
-          BCodeWriter::write_s_refsubexpfin(
-            &mut bw,
-            (1 << bits) + 1,
-            3,
-            mv_y_ref >> bits_diff,
-            mv_y >> bits_diff,
-          )?;
-        }
-        GlobalMVMode::ROTZOOM => unimplemented!(),
-        GlobalMVMode::AFFINE => unimplemented!(),
-      };
     }
-  }
 
-  bw.write_bit(true)?; // uniform tile spacing
-  if fi.width > 64 {
-    bw.write(1, 0)?; // tile cols
-  }
-  if fi.height > 64 {
-    bw.write(1, 0)?; // tile rows
-  }
-  // if tile_cols * tile_rows > 1
-  //.write_bit(true)?; // loop filter across tiles
-  bw.write(2, 3)?; // tile_size_bytes
-  bw.byte_align()?;
-  Ok(())
+    bw.write_bit(true)?; // uniform tile spacing
+    if fi.width > 64 {
+        bw.write(1,0)?; // tile cols
+    }
+    if fi.height > 64 {
+        bw.write(1,0)?; // tile rows
+    }
+    // if tile_cols * tile_rows > 1
+    //.write_bit(true)?; // loop filter across tiles
+    bw.write(2,3)?; // tile_size_bytes
+    bw.byte_align()?;
+    Ok(())
 }
 
 /// Write into `dst` the difference between the blocks at `src1` and `src2`
-fn diff(
-  dst: &mut [i16],
-  src1: &PlaneSlice,
-  src2: &PlaneSlice,
-  width: usize,
-  height: usize,
-) {
-  for j in 0..height {
-    for i in 0..width {
-      dst[j * width + i] = (src1.p(i, j) as i16) - (src2.p(i, j) as i16);
+fn diff(dst: &mut [i16], src1: &PlaneSlice, src2: &PlaneSlice, width: usize, height: usize) {
+    for j in 0..height {
+        for i in 0..width {
+            dst[j*width + i] = (src1.p(i, j) as i16) - (src2.p(i, j) as i16);
+        }
     }
-  }
 }
 
 // For a transform block,
@@ -1506,42 +1431,36 @@ pub fn encode_tx_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut Conte
     inverse_transform_add(&rcoeffs.array, &mut rec.mut_slice(po).as_mut_slice(), stride, tx_size, tx_type);
 }
 
-fn encode_block(
-  fi: &FrameInvariants,
-  fs: &mut FrameState,
-  cw: &mut ContextWriter,
-  luma_mode: PredictionMode,
-  chroma_mode: PredictionMode,
-  bsize: BlockSize,
-  bo: &BlockOffset,
-  skip: bool,
-) {
-  let is_inter = luma_mode >= PredictionMode::NEARESTMV;
+fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,
+            luma_mode: PredictionMode, chroma_mode: PredictionMode,
+            bsize: BlockSize, bo: &BlockOffset, skip: bool) {
+    let is_inter = luma_mode >= PredictionMode::NEARESTMV;
 
-  cw.bc.set_skip(bo, bsize, skip);
-  cw.write_skip(bo, skip);
+    cw.bc.set_skip(bo, bsize, skip);
+    cw.write_skip(bo, skip);
 
-  if fi.frame_type == FrameType::INTER {
-    cw.write_is_inter(bo, is_inter);
-    if !is_inter {
-      cw.write_intra_mode(bsize, luma_mode);
+    if fi.frame_type == FrameType::INTER {
+        cw.write_is_inter(bo, is_inter);
+        if !is_inter {
+            cw.write_intra_mode(bsize, luma_mode);
+        }
+    } else {
+        cw.write_intra_mode_kf(bo, luma_mode);
     }
-  } else {
-    cw.write_intra_mode_kf(bo, luma_mode);
-  }
 
-  cw.bc.set_mode(bo, bsize, luma_mode);
+    cw.bc.set_mode(bo, bsize, luma_mode);
 
-  let PlaneConfig { xdec, ydec, .. } = fs.input.planes[1].cfg;
+    let PlaneConfig { xdec, ydec, .. } = fs.input.planes[1].cfg;
 
-  if luma_mode.is_directional() && bsize >= BlockSize::BLOCK_8X8 {
-    cw.write_angle_delta(0, luma_mode);
-  }
+    if luma_mode.is_directional() && bsize >= BlockSize::BLOCK_8X8 {
+        cw.write_angle_delta(0, luma_mode);
+    }
 
-  if has_chroma(bo, bsize, xdec, ydec) {
-    cw.write_intra_uv_mode(chroma_mode, luma_mode, bsize);
-    if chroma_mode.is_directional() && bsize >= BlockSize::BLOCK_8X8 {
-      cw.write_angle_delta(0, chroma_mode);
+    if has_chroma(bo, bsize, xdec, ydec) {
+        cw.write_intra_uv_mode(chroma_mode, luma_mode, bsize);
+        if chroma_mode.is_directional() && bsize >= BlockSize::BLOCK_8X8 {
+            cw.write_angle_delta(0, chroma_mode);
+        }
     }
 
     if skip {
@@ -1564,7 +1483,7 @@ fn encode_block(
     // Luma plane transform type decision
     let tx_set = get_tx_set(tx_size, is_inter, fi.use_reduced_tx_set);
 
-    let tx_type = if tx_set > TxSet::TX_SET_DCTONLY && fi.config.speed <= 3 && !skip {
+    let tx_type = if tx_set > TxSet::TX_SET_DCTONLY && fi.config.speed <= 3 && skip == false {
         // FIXME: there is one redundant transform type decision per encoded block
         rdo_tx_type_decision(fi, fs, cw, luma_mode, bsize, bo, tx_size, tx_set)
     } else {
@@ -1592,7 +1511,7 @@ pub fn write_tx_blocks(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut Conte
             };
 
             let po = tx_bo.plane_offset(&fs.input.planes[0].cfg);
-            encode_tx_block(fi, fs, cw, 0, &tx_bo, luma_mode, tx_size, tx_type, bsize, &po, false); //skip, TODO: replace false with skip
+            encode_tx_block(fi, fs, cw, 0, &tx_bo, luma_mode, tx_size, tx_type, bsize, &po, false);//skip); TODO switch back
         }
     }
 
@@ -1647,281 +1566,194 @@ pub fn write_tx_blocks(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut Conte
                 }
             }
         }
-      }
     }
-  }
 }
 
-fn encode_partition_bottomup(
-  fi: &FrameInvariants,
-  fs: &mut FrameState,
-  cw: &mut ContextWriter,
-  bsize: BlockSize,
-  bo: &BlockOffset,
-) -> f64 {
-  let mut rd_cost = std::f64::MAX;
+fn encode_partition_bottomup(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,
+bsize: BlockSize, bo: &BlockOffset) -> f64 {
+    let mut rd_cost = std::f64::MAX;
 
-  if bo.x >= cw.bc.cols || bo.y >= cw.bc.rows {
-    return rd_cost;
-  }
-
-  let bs = bsize.width_mi();
-
-  // Always split if the current partition is too large
-  let must_split = bo.x + bs as usize > fi.w_in_b
-    || bo.y + bs as usize > fi.h_in_b
-    || bsize >= BlockSize::BLOCK_64X64;
-
-  // must_split overrides the minimum partition size when applicable
-  let can_split = bsize > fi.min_partition_size || must_split;
-
-  let mut partition = PartitionType::PARTITION_NONE;
-  let mut best_decision = RDOPartitionOutput {
-    rd_cost,
-    bo: bo.clone(),
-    pred_mode_luma: PredictionMode::DC_PRED,
-    pred_mode_chroma: PredictionMode::DC_PRED,
-    skip: false,
-  }; // Best decision that is not PARTITION_SPLIT
-
-  let hbs = bs >> 1; // Half the block size in blocks
-  let mut subsize: BlockSize;
-
-  let checkpoint = cw.checkpoint();
-
-  // Code the whole block
-  if !must_split {
-    partition = PartitionType::PARTITION_NONE;
-
-    if bsize >= BlockSize::BLOCK_8X8 {
-      cw.write_partition(bo, partition, bsize);
+    if bo.x >= cw.bc.cols || bo.y >= cw.bc.rows {
+        return rd_cost;
     }
 
-    let mode_decision =
-      rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone();
-    let (mode_luma, mode_chroma) =
-      (mode_decision.pred_mode_luma, mode_decision.pred_mode_chroma);
-    let skip = mode_decision.skip;
-    rd_cost = mode_decision.rd_cost;
+    let bs = bsize.width_mi();
 
-    encode_block(fi, fs, cw, mode_luma, mode_chroma, bsize, bo, skip);
+    // Always split if the current partition is too large
+    let must_split = bo.x + bs as usize > fi.w_in_b ||
+        bo.y + bs as usize > fi.h_in_b ||
+        bsize >= BlockSize::BLOCK_64X64;
 
-    best_decision = mode_decision;
-  }
+    // must_split overrides the minimum partition size when applicable
+    let can_split = bsize > fi.min_partition_size || must_split;
 
-  // Code a split partition and compare RD costs
-  if can_split {
-    cw.rollback(&checkpoint);
+    let mut partition = PartitionType::PARTITION_NONE;
+    let mut best_decision = RDOPartitionOutput {
+        rd_cost,
+        bo: bo.clone(),
+        pred_mode_luma: PredictionMode::DC_PRED,
+        pred_mode_chroma: PredictionMode::DC_PRED,
+        skip: false
+    }; // Best decision that is not PARTITION_SPLIT
 
-    partition = PartitionType::PARTITION_SPLIT;
+    let hbs = bs >> 1; // Half the block size in blocks
+    let mut subsize: BlockSize;
+
+    let checkpoint = cw.checkpoint();
+
+    // Code the whole block
+    if !must_split {
+        partition = PartitionType::PARTITION_NONE;
+
+        if bsize >= BlockSize::BLOCK_8X8 {
+            cw.write_partition(bo, partition, bsize);
+        }
+
+        let mode_decision = rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone();
+        let (mode_luma, mode_chroma) = (mode_decision.pred_mode_luma, mode_decision.pred_mode_chroma);
+        let skip = mode_decision.skip;
+        rd_cost = mode_decision.rd_cost;
+
+        encode_block(fi, fs, cw, mode_luma, mode_chroma, bsize, bo, skip);
+
+        best_decision = mode_decision;
+    }
+
+    // Code a split partition and compare RD costs
+    if can_split {
+        cw.rollback(&checkpoint);
+
+        partition = PartitionType::PARTITION_SPLIT;
+        subsize = get_subsize(bsize, partition);
+
+        let nosplit_rd_cost = rd_cost;
+
+        if bsize >= BlockSize::BLOCK_8X8 {
+            cw.write_partition(bo, partition, bsize);
+        }
+
+        rd_cost = encode_partition_bottomup(fi, fs, cw, subsize, bo);
+        rd_cost += encode_partition_bottomup(fi, fs, cw, subsize, &BlockOffset { x: bo.x + hbs as usize, y: bo.y });
+        rd_cost += encode_partition_bottomup(fi, fs, cw, subsize, &BlockOffset { x: bo.x, y: bo.y + hbs as usize });
+        rd_cost += encode_partition_bottomup(fi, fs, cw, subsize, &BlockOffset { x: bo.x + hbs as usize, y: bo.y + hbs as usize });
+
+        // Recode the full block if it is more efficient
+        if !must_split && nosplit_rd_cost < rd_cost {
+            cw.rollback(&checkpoint);
+
+            partition = PartitionType::PARTITION_NONE;
+
+            if bsize >= BlockSize::BLOCK_8X8 {
+                cw.write_partition(bo, partition, bsize);
+            }
+
+            // FIXME: redundant block re-encode
+            let (mode_luma, mode_chroma) = (best_decision.pred_mode_luma, best_decision.pred_mode_chroma);
+            let skip = best_decision.skip;
+            encode_block(fi, fs, cw, mode_luma, mode_chroma, bsize, bo, skip);
+        }
+    }
+
     subsize = get_subsize(bsize, partition);
 
-    let nosplit_rd_cost = rd_cost;
-
-    if bsize >= BlockSize::BLOCK_8X8 {
-      cw.write_partition(bo, partition, bsize);
+    if bsize >= BlockSize::BLOCK_8X8 &&
+        (bsize == BlockSize::BLOCK_8X8 || partition != PartitionType::PARTITION_SPLIT) {
+        cw.bc.update_partition_context(bo, subsize, bsize);
     }
 
-    rd_cost = encode_partition_bottomup(fi, fs, cw, subsize, bo);
-    rd_cost += encode_partition_bottomup(
-      fi,
-      fs,
-      cw,
-      subsize,
-      &BlockOffset {
-        x: bo.x + hbs as usize,
-        y: bo.y,
-      },
-    );
-    rd_cost += encode_partition_bottomup(
-      fi,
-      fs,
-      cw,
-      subsize,
-      &BlockOffset {
-        x: bo.x,
-        y: bo.y + hbs as usize,
-      },
-    );
-    rd_cost += encode_partition_bottomup(
-      fi,
-      fs,
-      cw,
-      subsize,
-      &BlockOffset {
-        x: bo.x + hbs as usize,
-        y: bo.y + hbs as usize,
-      },
-    );
-
-    // Recode the full block if it is more efficient
-    if !must_split && nosplit_rd_cost < rd_cost {
-      cw.rollback(&checkpoint);
-
-      partition = PartitionType::PARTITION_NONE;
-
-      if bsize >= BlockSize::BLOCK_8X8 {
-        cw.write_partition(bo, partition, bsize);
-      }
-
-      // FIXME: redundant block re-encode
-      let (mode_luma, mode_chroma) =
-        (best_decision.pred_mode_luma, best_decision.pred_mode_chroma);
-      let skip = best_decision.skip;
-      encode_block(fi, fs, cw, mode_luma, mode_chroma, bsize, bo, skip);
-    }
-  }
-
-  subsize = get_subsize(bsize, partition);
-
-  if bsize >= BlockSize::BLOCK_8X8
-    && (bsize == BlockSize::BLOCK_8X8
-      || partition != PartitionType::PARTITION_SPLIT)
-  {
-    cw.bc.update_partition_context(bo, subsize, bsize);
-  }
-
-  rd_cost
+    rd_cost
 }
 
-fn encode_partition_topdown(
-  fi: &FrameInvariants,
-  fs: &mut FrameState,
-  cw: &mut ContextWriter,
-  bsize: BlockSize,
-  bo: &BlockOffset,
-  block_output: &Option<RDOOutput>,
-) {
-  if bo.x >= cw.bc.cols || bo.y >= cw.bc.rows {
-    return;
-  }
+fn encode_partition_topdown(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,
+            bsize: BlockSize, bo: &BlockOffset, block_output: &Option<RDOOutput>) {
 
-  let bs = bsize.width_mi();
-
-  // Always split if the current partition is too large
-  let must_split = bo.x + bs as usize > fi.w_in_b
-    || bo.y + bs as usize > fi.h_in_b
-    || bsize >= BlockSize::BLOCK_64X64;
-
-  let mut rdo_output = block_output.clone().unwrap_or(RDOOutput {
-    part_type: PartitionType::PARTITION_INVALID,
-    rd_cost: std::f64::MAX,
-    part_modes: std::vec::Vec::new(),
-  });
-  let partition: PartitionType;
-
-  if must_split {
-    // Oversized blocks are split automatically
-    partition = PartitionType::PARTITION_SPLIT;
-  } else if bsize > fi.min_partition_size {
-    // Blocks of sizes within the supported range are subjected to a partitioning decision
-    rdo_output = rdo_partition_decision(fi, fs, cw, bsize, bo, &rdo_output);
-    partition = rdo_output.part_type;
-  } else {
-    // Blocks of sizes below the supported range are encoded directly
-    partition = PartitionType::PARTITION_NONE;
-  }
-
-  assert!(bsize.width_mi() == bsize.height_mi());
-  assert!(
-    PartitionType::PARTITION_NONE <= partition
-      && partition < PartitionType::PARTITION_INVALID
-  );
-
-  let hbs = bs >> 1; // Half the block size in blocks
-  let subsize = get_subsize(bsize, partition);
-
-  if bsize >= BlockSize::BLOCK_8X8 {
-    cw.write_partition(bo, partition, bsize);
-  }
-
-  match partition {
-    PartitionType::PARTITION_NONE => {
-      let part_decision = if !rdo_output.part_modes.is_empty() {
-        // The optimal prediction mode is known from a previous iteration
-        rdo_output.part_modes[0].clone()
-      } else {
-        // Make a prediction mode decision for blocks encoded with no rdo_partition_decision call (e.g. edges)
-        rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone()
-      };
-
-      let (mode_luma, mode_chroma) =
-        (part_decision.pred_mode_luma, part_decision.pred_mode_chroma);
-      let skip = part_decision.skip;
-
-      // FIXME: every final block that has gone through the RDO decision process is encoded twice
-      encode_block(fi, fs, cw, mode_luma, mode_chroma, bsize, bo, skip);
+    if bo.x >= cw.bc.cols || bo.y >= cw.bc.rows {
+        return;
     }
-    PartitionType::PARTITION_SPLIT => {
-      if rdo_output.part_modes.len() >= 4 {
-        // The optimal prediction modes for each split block is known from an rdo_partition_decision() call
-        assert!(subsize != BlockSize::BLOCK_INVALID);
 
-        for mode in rdo_output.part_modes {
-          let offset = mode.bo.clone();
+    let bs = bsize.width_mi();
 
-          // Each block is subjected to a new splitting decision
-          encode_partition_topdown(
-            fi,
-            fs,
-            cw,
-            subsize,
-            &offset,
-            &Some(RDOOutput {
-              rd_cost: mode.rd_cost,
-              part_type: PartitionType::PARTITION_NONE,
-              part_modes: vec![mode],
-            }),
-          );
-        }
-      } else {
-        encode_partition_topdown(fi, fs, cw, subsize, bo, &None);
-        encode_partition_topdown(
-          fi,
-          fs,
-          cw,
-          subsize,
-          &BlockOffset {
-            x: bo.x + hbs as usize,
-            y: bo.y,
-          },
-          &None,
-        );
-        encode_partition_topdown(
-          fi,
-          fs,
-          cw,
-          subsize,
-          &BlockOffset {
-            x: bo.x,
-            y: bo.y + hbs as usize,
-          },
-          &None,
-        );
-        encode_partition_topdown(
-          fi,
-          fs,
-          cw,
-          subsize,
-          &BlockOffset {
-            x: bo.x + hbs as usize,
-            y: bo.y + hbs as usize,
-          },
-          &None,
-        );
-      }
+    // Always split if the current partition is too large
+    let must_split = bo.x + bs as usize > fi.w_in_b ||
+        bo.y + bs as usize > fi.h_in_b ||
+        bsize >= BlockSize::BLOCK_64X64;
+
+    let mut rdo_output = block_output.clone().unwrap_or(RDOOutput {
+        part_type: PartitionType::PARTITION_INVALID,
+        rd_cost: std::f64::MAX,
+        part_modes: std::vec::Vec::new()
+    });
+    let partition: PartitionType;
+
+    if must_split {
+        // Oversized blocks are split automatically
+        partition = PartitionType::PARTITION_SPLIT;
+    } else if bsize > fi.min_partition_size {
+        // Blocks of sizes within the supported range are subjected to a partitioning decision
+        rdo_output = rdo_partition_decision(fi, fs, cw, bsize, bo, &rdo_output);
+        partition = rdo_output.part_type;
+    } else {
+        // Blocks of sizes below the supported range are encoded directly
+        partition = PartitionType::PARTITION_NONE;
     }
-    _ => {
-      assert!(false);
-    }
-  }
 
-  if bsize >= BlockSize::BLOCK_8X8
-    && (bsize == BlockSize::BLOCK_8X8
-      || partition != PartitionType::PARTITION_SPLIT)
-  {
-    cw.bc.update_partition_context(bo, subsize, bsize);
-  }
+    assert!(bsize.width_mi() == bsize.height_mi());
+    assert!(PartitionType::PARTITION_NONE <= partition &&
+            partition < PartitionType::PARTITION_INVALID);
+
+    let hbs = bs >> 1; // Half the block size in blocks
+    let subsize = get_subsize(bsize, partition);
+
+    if bsize >= BlockSize::BLOCK_8X8 {
+        cw.write_partition(bo, partition, bsize);
+    }
+
+    match partition {
+        PartitionType::PARTITION_NONE => {
+            let part_decision = if !rdo_output.part_modes.is_empty() {
+                    // The optimal prediction mode is known from a previous iteration
+                    rdo_output.part_modes[0].clone()
+                } else {
+                    // Make a prediction mode decision for blocks encoded with no rdo_partition_decision call (e.g. edges)
+                    rdo_mode_decision(fi, fs, cw, bsize, bo).part_modes[0].clone()
+                };
+
+            let (mode_luma, mode_chroma) = (part_decision.pred_mode_luma, part_decision.pred_mode_chroma);
+            let skip = part_decision.skip;
+
+            // FIXME: every final block that has gone through the RDO decision process is encoded twice
+            encode_block(fi, fs, cw, mode_luma, mode_chroma, bsize, bo, skip);
+        },
+        PartitionType::PARTITION_SPLIT => {
+            if rdo_output.part_modes.len() >= 4 {
+                // The optimal prediction modes for each split block is known from an rdo_partition_decision() call
+                assert!(subsize != BlockSize::BLOCK_INVALID);
+
+                for mode in rdo_output.part_modes {
+                    let offset = mode.bo.clone();
+
+                    // Each block is subjected to a new splitting decision
+                    encode_partition_topdown(fi, fs, cw, subsize, &offset,
+                        &Some(RDOOutput {
+                            rd_cost: mode.rd_cost,
+                            part_type: PartitionType::PARTITION_NONE,
+                            part_modes: vec![mode] }));
+                }
+            }
+            else {
+                encode_partition_topdown(fi, fs, cw, subsize, bo, &None);
+                encode_partition_topdown(fi, fs, cw, subsize, &BlockOffset{x: bo.x + hbs as usize, y: bo.y}, &None);
+                encode_partition_topdown(fi, fs, cw, subsize, &BlockOffset{x: bo.x, y: bo.y + hbs as usize}, &None);
+                encode_partition_topdown(fi, fs, cw, subsize, &BlockOffset{x: bo.x + hbs as usize, y: bo.y + hbs as usize}, &None);
+            }
+        },
+        _ => { assert!(false); },
+    }
+
+    if bsize >= BlockSize::BLOCK_8X8 &&
+        (bsize == BlockSize::BLOCK_8X8 || partition != PartitionType::PARTITION_SPLIT) {
+            cw.bc.update_partition_context(bo, subsize, bsize);
+    }
 }
 
 fn encode_tile(fi: &FrameInvariants, fs: &mut FrameState) -> Vec<u8> {
@@ -2001,11 +1833,7 @@ fn encode_frame(sequence: &mut Sequence, fi: &mut FrameInvariants, fs: &mut Fram
 
         packet.write(&tile).unwrap();
     }
-  } else {
-    let tile = encode_tile(fi, fs);
-    packet.write(&tile).unwrap();
-  }
-  packet
+    packet
 }
 
 pub fn update_rec_buffer(fi: &FrameInvariants, rec_buffer: &mut [Option<Rc<Frame>>],
@@ -2099,8 +1927,6 @@ pub fn process_frame(sequence: &mut Sequence, fi: &mut FrameInvariants,
         },
         _ => false
     }
-    _ => false,
-  }
 }
 
 
