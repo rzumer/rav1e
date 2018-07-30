@@ -507,6 +507,8 @@ fn model_rd_with_dnn(
   let q = dc_q(fi.config.quantizer);
   let q_step = q >> dequant_shift; // may be valid only for luma
 
+  let shift = 0; // bit depth - 8
+
   let (bw, bh) = (bsize.width(), bsize.height());
 
   let sse = sse_wxh(
@@ -518,18 +520,38 @@ fn model_rd_with_dnn(
 
   if sse > 0f32 {
     let sse_norm = sse / num_samples as f32;
-
-    let sse_norm_arr = get_2x2_normalized_sses(fs, bsize, bo, plane);
-    let mean = mean_error_wxh(
+    let mut sse_norm_arr = get_2x2_normalized_sses(fs, bsize, bo, plane);
+    let mut mean = mean_error_wxh(
       &fs.input.planes[plane].slice(&po),
       &fs.rec.planes[plane].slice(&po),
       bw,
       bh,
     );
 
-    let variance = sse_norm - mean * mean;
+    if shift > 0 {
+      for k in 0..4 {
+        sse_norm_arr[k] /= (1 << (2 * shift)) as f32;
+      }
+
+      mean /= (1 << shift) as f32;
+    }
+
+    let sse_norm_sum = sse_norm_arr.iter().sum::<f32>();
+    let mut sse_frac_arr: [f32; 3];
+
+    if sse_norm_sum == 0f32 {
+      sse_frac_arr = [0.25; 3];
+    } else {
+      sse_frac_arr = [0f32; 3];
+
+      for k in 0..3 {
+        sse_frac_arr[k] = sse_norm_arr[k] / sse_norm_sum;
+      }
+    }
+
     let q_sqr = (q_step * q_step) as f32;
     let q_sqr_by_sse_norm = q_sqr / (sse_norm + 1f32);
+    let mean_sqr_by_sse_norm = mean * mean / (sse_norm + 1f32);
     let (hor_corr, vert_corr) = get_horver_correlation(
       &fs.input.planes[plane].slice(&po),
       &fs.rec.planes[plane].slice(&po),
@@ -540,18 +562,15 @@ fn model_rd_with_dnn(
     let features: Vec<f32> = vec![
       hor_corr,
       log_numpels as f32,
-      q_sqr,
+      mean_sqr_by_sse_norm,
       q_sqr_by_sse_norm,
-      sse_norm_arr[0],
-      sse_norm_arr[1],
-      sse_norm_arr[2],
-      sse_norm_arr[3],
-      sse_norm,
-      variance,
-      vert_corr,
+      sse_frac_arr[0],
+      sse_frac_arr[1],
+      sse_frac_arr[2],
+      vert_corr
     ];
 
-    for i in 0..11 {
+    for i in 0..8 {
       println!("Feature #{}: {}", i, features[i]);
     }
 
@@ -571,7 +590,7 @@ fn model_rd_with_dnn(
     }*/
   }
   
-  println!("R/D/E: {}/{}/{}", rate, distortion, sse);
+  println!("{}: R/D/E: {}/{}/{}", plane, rate, distortion, sse);
 
   let lambda = ((q * q) as f64) * std::f64::consts::LN_2 / 6.0;
   distortion + lambda * rate
