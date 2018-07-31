@@ -1436,8 +1436,8 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
             bsize: BlockSize, bo: &BlockOffset, skip: bool) {
     let is_inter = luma_mode >= PredictionMode::NEARESTMV;
 
-    cw.bc.set_skip(bo, bsize, !fi.use_nn_prediction && skip);
-    cw.write_skip(bo, !fi.use_nn_prediction && skip);
+    cw.bc.set_skip(bo, bsize, skip);
+    cw.write_skip(bo, skip);
 
     if fi.frame_type == FrameType::INTER {
         cw.write_is_inter(bo, is_inter);
@@ -1463,7 +1463,7 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
         }
     }
 
-    if !fi.use_nn_prediction && skip {
+    if skip {
         cw.bc.reset_skip_context(bo, bsize, xdec, ydec);
     }
 
@@ -1483,14 +1483,14 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
     // Luma plane transform type decision
     let tx_set = get_tx_set(tx_size, is_inter, fi.use_reduced_tx_set);
 
-    let tx_type = if tx_set > TxSet::TX_SET_DCTONLY && fi.config.speed <= 3 && skip == false {
+    let tx_type = if tx_set > TxSet::TX_SET_DCTONLY && fi.config.speed <= 3 {
         // FIXME: there is one redundant transform type decision per encoded block
         rdo_tx_type_decision(fi, fs, cw, luma_mode, bsize, bo, tx_size, tx_set)
     } else {
         TxType::DCT_DCT
     };
 
-    write_tx_blocks(fi, fs, cw, luma_mode, chroma_mode, bo, bsize, tx_size, tx_type, !fi.use_nn_prediction && skip);
+    write_tx_blocks(fi, fs, cw, luma_mode, chroma_mode, bo, bsize, tx_size, tx_type, skip);
 }
 
 pub fn write_tx_blocks(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,

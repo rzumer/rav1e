@@ -250,7 +250,7 @@ pub fn rdo_mode_decision(
     }
 
     if fi.use_nn_prediction {
-      encode_block(fi, fs, cw, luma_mode, luma_mode, bsize, bo, true);
+      encode_block(fi, fs, cw, luma_mode, luma_mode, bsize, bo, skip);
 
       let rd = model_rd_with_dnn(fi, fs, bsize, bo, 0);
 
@@ -352,19 +352,22 @@ pub fn rdo_tx_type_decision(
       fi, fs, cw, mode, mode, bo, bsize, tx_size, tx_type, false,
     );
 
-    let cost = cw.w.tell_frac() - tell;
-    let rd = compute_rd_cost(
-      fi,
-      fs,
-      w,
-      h,
-      w_uv,
-      h_uv,
-      partition_start_x,
-      partition_start_y,
-      bo,
-      cost,
-    );
+    let rd = if fi.use_nn_prediction {
+      model_rd_with_dnn(fi, fs, bsize, bo, 0)
+    } else {
+      compute_rd_cost(
+        fi,
+        fs,
+        w,
+        h,
+        w_uv,
+        h_uv,
+        partition_start_x,
+        partition_start_y,
+        bo,
+        cw.w.tell_frac() - tell,
+      )
+    };
 
     if rd < best_rd {
       best_rd = rd;
