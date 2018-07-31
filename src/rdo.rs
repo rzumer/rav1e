@@ -190,8 +190,6 @@ pub fn rdo_mode_decision(
   let partition_start_x = (bo.x & LOCAL_BLOCK_MASK) >> xdec << MI_SIZE_LOG2;
   let partition_start_y = (bo.y & LOCAL_BLOCK_MASK) >> ydec << MI_SIZE_LOG2;
 
-  let skip = false;
-
   let checkpoint = cw.checkpoint();
 
   // Exclude complex prediction modes at higher speed levels
@@ -201,6 +199,7 @@ pub fn rdo_mode_decision(
     RAV1E_INTRA_MODES_MINIMAL
   };
 
+for &skip in &[false, true] {
   for &luma_mode in mode_set {
     if fi.frame_type == FrameType::KEY
       && luma_mode >= PredictionMode::NEARESTMV
@@ -263,21 +262,7 @@ pub fn rdo_mode_decision(
       cw.rollback(&checkpoint);
     }
   }
-
-  // Make a skip decision at lower speed levels
-  if fi.config.speed <= 1 {
-    encode_block(fi, fs, cw, best_mode_luma, best_mode_chroma, bsize, bo, true);
-    let cost = cw.w.tell_frac() - tell;
-    let rd = compute_rd_cost(fi, fs, w, h, w_uv, h_uv,
-      partition_start_x, partition_start_y, bo, cost);
-
-    if rd < best_rd {
-      best_rd = rd;
-      best_skip = true;
-    }
-
-    cw.rollback(&checkpoint);
-  }
+}
 
   assert!(best_rd >= 0_f64);
 
