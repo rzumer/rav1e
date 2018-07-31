@@ -264,6 +264,21 @@ pub fn rdo_mode_decision(
     }
   }
 
+  // Make a skip decision at lower speed levels
+  if fi.config.speed <= 1 {
+    encode_block(fi, fs, cw, best_mode_luma, best_mode_chroma, bsize, bo, true);
+    let cost = cw.w.tell_frac() - tell;
+    let rd = compute_rd_cost(fi, fs, w, h, w_uv, h_uv,
+      partition_start_x, partition_start_y, bo, cost);
+
+    if rd < best_rd {
+      best_rd = rd;
+      best_skip = true;
+    }
+
+    cw.rollback(&checkpoint);
+  }
+
   assert!(best_rd >= 0_f64);
 
   RDOOutput {
@@ -283,7 +298,7 @@ pub fn rdo_mode_decision(
 pub fn rdo_tx_type_decision(
   fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,
   mode: PredictionMode, bsize: BlockSize, bo: &BlockOffset, tx_size: TxSize,
-  tx_set: TxSet
+  tx_set: TxSet, skip: bool
 ) -> TxType {
   let mut best_type = TxType::DCT_DCT;
   let mut best_rd = std::f64::MAX;
@@ -315,7 +330,7 @@ pub fn rdo_tx_type_decision(
     }
 
     write_tx_blocks(
-      fi, fs, cw, mode, mode, bo, bsize, tx_size, tx_type, false,
+      fi, fs, cw, mode, mode, bo, bsize, tx_size, tx_type, skip,
     );
 
     let cost = cw.w.tell_frac() - tell;

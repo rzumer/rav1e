@@ -1491,7 +1491,7 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
 
     let tx_type = if tx_set > TxSet::TX_SET_DCTONLY && fi.config.speed <= 3 {
         // FIXME: there is one redundant transform type decision per encoded block
-        rdo_tx_type_decision(fi, fs, cw, luma_mode, bsize, bo, tx_size, tx_set)
+        rdo_tx_type_decision(fi, fs, cw, luma_mode, bsize, bo, tx_size, tx_set, skip)
     } else {
         TxType::DCT_DCT
     };
@@ -2020,8 +2020,8 @@ mod test_encode_decode {
     fn speed() {
         let quantizer = 100;
         let limit = 5;
-        let w = 64;
-        let h = 80;
+        let w = 128;
+        let h = 64;
 
         for b in DIMENSION_OFFSETS.iter() {
             for s in 0 .. 10 {
