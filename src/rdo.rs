@@ -252,7 +252,7 @@ pub fn rdo_mode_decision(
     if fi.use_nn_prediction {
       encode_block(fi, fs, cw, luma_mode, luma_mode, bsize, bo, true);
 
-      let rd = 0f64;//model_rd_with_dnn(fi, fs, bsize, bo, 0);
+      let rd = model_rd_with_dnn(fi, fs, bsize, bo, 0);
 
       if rd < best_rd {
         best_rd = rd;

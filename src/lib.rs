@@ -1436,8 +1436,8 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
             bsize: BlockSize, bo: &BlockOffset, skip: bool) {
     let is_inter = luma_mode >= PredictionMode::NEARESTMV;
 
-    cw.bc.set_skip(bo, bsize, skip);
-    cw.write_skip(bo, skip);
+    cw.bc.set_skip(bo, bsize, !fi.use_nn_prediction && skip);
+    cw.write_skip(bo, !fi.use_nn_prediction && skip);
 
     if fi.frame_type == FrameType::INTER {
         cw.write_is_inter(bo, is_inter);
@@ -1463,7 +1463,7 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
         }
     }
 
-    if skip {
+    if !fi.use_nn_prediction && skip {
         cw.bc.reset_skip_context(bo, bsize, xdec, ydec);
     }
 
@@ -1490,7 +1490,7 @@ fn encode_block(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWrite
         TxType::DCT_DCT
     };
 
-    write_tx_blocks(fi, fs, cw, luma_mode, chroma_mode, bo, bsize, tx_size, tx_type, skip);
+    write_tx_blocks(fi, fs, cw, luma_mode, chroma_mode, bo, bsize, tx_size, tx_type, !fi.use_nn_prediction && skip);
 }
 
 pub fn write_tx_blocks(fi: &FrameInvariants, fs: &mut FrameState, cw: &mut ContextWriter,
