@@ -251,7 +251,7 @@ pub fn rdo_mode_decision(
     }
 
     if fi.use_nn_prediction {
-      encode_block(fi, fs, cw, luma_mode, luma_mode, bsize, bo, skip);
+      encode_block(seq, fi, fs, cw, wr, luma_mode, luma_mode, bsize, bo, skip, cdef_index);
 
       let rd = model_rd_with_dnn(fi, fs, bsize, bo, 0);
 
@@ -262,13 +262,14 @@ pub fn rdo_mode_decision(
         best_skip = skip;
       }
 
-      cw.rollback(&checkpoint);
+      cw.rollback(&cw_checkpoint);
+      wr.rollback(&w_checkpoint);
     } else if is_chroma_block && fi.config.speed <= 3 {
       // Find the best chroma prediction mode for the current luma prediction mode
       for &chroma_mode in RAV1E_INTRA_MODES {
         encode_block(seq, fi, fs, cw, wr, luma_mode, chroma_mode, bsize, bo, skip, cdef_index);
 
-        let cost = cw.w.tell_frac() - tell;
+        let cost = wr.tell_frac() - tell;
         let rd = compute_rd_cost(fi, fs, w, h, w_uv, h_uv, 
           partition_start_x, partition_start_y, bo, cost);
           
@@ -285,7 +286,7 @@ pub fn rdo_mode_decision(
     } else {
       encode_block(seq, fi, fs, cw, wr, luma_mode, luma_mode, bsize, bo, skip, cdef_index);
 
-      let cost = cw.w.tell_frac() - tell;
+      let cost = wr.tell_frac() - tell;
       let rd = compute_rd_cost(fi, fs, w, h, w_uv, h_uv, 
         partition_start_x, partition_start_y, bo, cost);
 
@@ -370,7 +371,7 @@ pub fn rdo_tx_type_decision(
         partition_start_x,
         partition_start_y,
         bo,
-        cw.w.tell_frac() - tell,
+        wr.tell_frac() - tell,
       )
     };
 
@@ -586,8 +587,8 @@ fn model_rd_with_dnn(
     let rate_f = RATE_MODEL.predict(&features)[0] as f64;
     let dist_f = dist_by_sse_norm_f as f64 * (1f64 + sse_norm as f64);
 
-    rate = ((rate_f * (1 << log_numpels) as f64) + 0.5).abs();
-    distortion = ((dist_f * (1 << log_numpels) as f64) + 0.5).abs();
+    rate = ((rate_f * (1 << log_numpels) as f64) + 0.5).max(0f64).floor();
+    distortion = ((dist_f * (1 << log_numpels) as f64) + 0.5).max(0f64).floor();
 
     // TODO: check if skip is better
     /*if (RDCOST(x->rdmult, rate_i, dist_i) >= RDCOST(x->rdmult, 0, (sse << 4))) {
@@ -598,7 +599,7 @@ fn model_rd_with_dnn(
     }*/
   }
   
-  println!("{}: R/D/E: {}/{}/{}", plane, rate, distortion, sse);
+  //println!("{}: R/D/E: {}/{}/{}", plane, rate, distortion, sse);
 
   let lambda = ((q * q) as f64) * std::f64::consts::LN_2 / 6.0;
   distortion + lambda * rate

@@ -215,7 +215,7 @@ static size_group_lookup: [u8; BlockSize::BLOCK_SIZES_ALL] = [
   2, 3, 3
 ];
 
-static num_pels_log2_lookup: [u8; BlockSize::BLOCK_SIZES_ALL] = [
+pub static num_pels_log2_lookup: [u8; BlockSize::BLOCK_SIZES_ALL] = [
   4, 5, 5, 6, 7, 7, 8, 9, 9, 10, 11, 11, 12, 13, 13, 14, 6, 6, 8, 8, 10, 10, 12, 12];
 
 pub static subsize_lookup: [[BlockSize; BlockSize::BLOCK_SIZES_ALL]; EXT_PARTITION_TYPES] =
