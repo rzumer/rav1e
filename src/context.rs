@@ -1,5 +1,5 @@
-// Copyright (c) 2017-2018, The rav1e contributors. All rights reserved
 //
+// Copyright (c) 2017-2018, The rav1e contributors. All rights reserved
 // This source code is subject to the terms of the BSD 2 Clause License and
 // the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
 // was not distributed with this source code in the LICENSE file, you can
@@ -16,7 +16,7 @@
 #![cfg_attr(feature = "cargo-clippy", allow(needless_range_loop))]
 #![cfg_attr(feature = "cargo-clippy", allow(collapsible_if))]
 
-use ec;
+use ec::Writer;
 use partition::BlockSize::*;
 use partition::PredictionMode::*;
 use partition::TxType::*;
@@ -27,7 +27,9 @@ use std::*;
 const PLANES: usize = 3;
 
 const PARTITION_PLOFFSET: usize = 4;
-const PARTITION_CONTEXTS: usize = 20;
+const PARTITION_BLOCK_SIZES: usize = 4 + 1;
+const PARTITION_CONTEXTS_PRIMARY: usize = PARTITION_BLOCK_SIZES * PARTITION_PLOFFSET;
+const PARTITION_CONTEXTS: usize = PARTITION_CONTEXTS_PRIMARY;
 pub const PARTITION_TYPES: usize = 4;
 
 pub const MI_SIZE_LOG2: usize = 2;
@@ -43,17 +45,19 @@ const MAX_SB_SQUARE: usize = (MAX_SB_SIZE * MAX_SB_SIZE);
 pub const MAX_TX_SIZE: usize = 32;
 const MAX_TX_SQUARE: usize = MAX_TX_SIZE * MAX_TX_SIZE;
 
-const INTRA_MODES: usize = 13;
+pub const INTRA_MODES: usize = 13;
 const UV_INTRA_MODES: usize = 14;
 const BLOCK_SIZE_GROUPS: usize = 4;
 const MAX_ANGLE_DELTA: usize = 3;
 const DIRECTIONAL_MODES: usize = 8;
 const KF_MODE_CONTEXTS: usize = 5;
 
+const EXT_PARTITION_TYPES: usize = 10;
 const TX_SIZES: usize = 4;
 const TX_SETS: usize = 9;
 const TX_SETS_INTRA: usize = 3;
 const TX_SETS_INTER: usize = 4;
+
 // Number of transform types in each set type
 static num_tx_set: [usize; TX_SETS] =
   [1, 2, 5, 7, 7, 10, 12, 16, 16];
@@ -150,12 +154,17 @@ static ss_size_lookup: [[[BlockSize; 2]; 2]; BlockSize::BLOCK_SIZES_ALL] = [
   [  [ BLOCK_32X64, BLOCK_32X32 ], [BLOCK_16X64, BLOCK_16X32 ] ],
   [  [ BLOCK_64X32, BLOCK_64X16 ], [BLOCK_32X32, BLOCK_32X16 ] ],
   [  [ BLOCK_64X64, BLOCK_64X32 ], [BLOCK_32X64, BLOCK_32X32 ] ],
+  [  [ BLOCK_64X128, BLOCK_64X64 ], [ BLOCK_32X128, BLOCK_32X64 ] ],
+  [  [ BLOCK_128X64, BLOCK_128X32 ], [ BLOCK_64X64, BLOCK_64X32 ] ],
+  [  [ BLOCK_128X128, BLOCK_128X64 ], [ BLOCK_64X128, BLOCK_64X64 ] ],
   [  [ BLOCK_4X16, BLOCK_4X8 ], [BLOCK_4X16, BLOCK_4X8 ] ],
   [  [ BLOCK_16X4, BLOCK_16X4 ], [BLOCK_8X4, BLOCK_8X4 ] ],
   [  [ BLOCK_8X32, BLOCK_8X16 ], [BLOCK_INVALID, BLOCK_4X16 ] ],
   [  [ BLOCK_32X8, BLOCK_INVALID ], [BLOCK_16X8, BLOCK_16X4 ] ],
   [  [ BLOCK_16X64, BLOCK_16X32 ], [BLOCK_INVALID, BLOCK_8X32 ] ],
   [  [ BLOCK_64X16, BLOCK_INVALID ], [BLOCK_32X16, BLOCK_32X8 ] ],
+  [  [ BLOCK_32X128, BLOCK_32X64 ], [ BLOCK_INVALID, BLOCK_16X64 ] ],
+  [  [ BLOCK_128X32, BLOCK_INVALID ], [ BLOCK_64X32, BLOCK_64X16 ] ],
 ];
 
 pub fn get_plane_block_size(bsize: BlockSize, subsampling_x: usize, subsampling_y: usize)
@@ -167,26 +176,30 @@ pub fn get_plane_block_size(bsize: BlockSize, subsampling_x: usize, subsampling_
 // a blocksize partition  1111 means we split 64x64, 32x32, 16x16
 // and 8x8.  1000 means we just split the 64x64 to 32x32
 static partition_context_lookup: [[u8; 2]; BlockSize::BLOCK_SIZES_ALL] = [
-  [ 15, 15 ],  // 4X4   - [0b1111, 0b1111]
-  [ 15, 14 ],  // 4X8   - [0b1111, 0b1110]
-  [ 14, 15 ],  // 8X4   - [0b1110, 0b1111]
-  [ 14, 14 ],  // 8X8   - [0b1110, 0b1110]
-  [ 14, 12 ],  // 8X16  - [0b1110, 0b1100]
-  [ 12, 14 ],  // 16X8  - [0b1100, 0b1110]
-  [ 12, 12 ],  // 16X16 - [0b1100, 0b1100]
-  [ 12, 8 ],   // 16X32 - [0b1100, 0b1000]
-  [ 8, 12 ],   // 32X16 - [0b1000, 0b1100]
-  [ 8, 8 ],    // 32X32 - [0b1000, 0b1000]
-  [ 8, 0 ],    // 32X64 - [0b1000, 0b0000]
-  [ 0, 8 ],    // 64X32 - [0b0000, 0b1000]
-  [ 0, 0 ],    // 64X64 - [0b0000, 0b0000]
-
-  [ 15, 12 ],  // 4X16 - [0b1111, 0b1100]
-  [ 12, 15 ],  // 16X4 - [0b1100, 0b1111]
-  [ 8, 14 ],   // 8X32 - [0b1110, 0b1000]
-  [ 14, 8 ],   // 32X8 - [0b1000, 0b1110]
-  [ 12, 0 ],   // 16X64- [0b1100, 0b0000]
-  [ 0, 12 ],   // 64X16- [0b0000, 0b1100]
+  [ 31, 31 ],  // 4X4   - {0b11111, 0b11111}
+  [ 31, 30 ],  // 4X8   - {0b11111, 0b11110}
+  [ 30, 31 ],  // 8X4   - {0b11110, 0b11111}
+  [ 30, 30 ],  // 8X8   - {0b11110, 0b11110}
+  [ 30, 28 ],  // 8X16  - {0b11110, 0b11100}
+  [ 28, 30 ],  // 16X8  - {0b11100, 0b11110}
+  [ 28, 28 ],  // 16X16 - {0b11100, 0b11100}
+  [ 28, 24 ],  // 16X32 - {0b11100, 0b11000}
+  [ 24, 28 ],  // 32X16 - {0b11000, 0b11100}
+  [ 24, 24 ],  // 32X32 - {0b11000, 0b11000}
+  [ 24, 16 ],  // 32X64 - {0b11000, 0b10000}
+  [ 16, 24 ],  // 64X32 - {0b10000, 0b11000}
+  [ 16, 16 ],  // 64X64 - {0b10000, 0b10000}
+  [ 16, 0 ],   // 64X128- {0b10000, 0b00000}
+  [ 0, 16 ],   // 128X64- {0b00000, 0b10000}
+  [ 0, 0 ],    // 128X128-{0b00000, 0b00000}
+  [ 31, 28 ],  // 4X16  - {0b11111, 0b11100}
+  [ 28, 31 ],  // 16X4  - {0b11100, 0b11111}
+  [ 30, 24 ],  // 8X32  - {0b11110, 0b11000}
+  [ 24, 30 ],  // 32X8  - {0b11000, 0b11110}
+  [ 28, 16 ],  // 16X64 - {0b11100, 0b10000}
+  [ 16, 28 ],  // 64X16 - {0b10000, 0b11100}
+  [ 24, 0 ],   // 32X128- {0b11000, 0b00000}
+  [ 0, 24 ],   // 128X32- {0b00000, 0b11000}
 ];
 
 static size_group_lookup: [u8; BlockSize::BLOCK_SIZES_ALL] = [
@@ -196,18 +209,18 @@ static size_group_lookup: [u8; BlockSize::BLOCK_SIZES_ALL] = [
   2, 2,
   2, 3,
   3, 3,
-  3, 0,
+  3, 3, 3, 3, 0,
   0, 1,
   1, 2,
-  2,
+  2, 3, 3
 ];
 
-pub static num_pels_log2_lookup: [u8; BlockSize::BLOCK_SIZES_ALL] = [
-  4, 5, 5, 6, 7, 7, 8, 9, 9, 10, 11, 11, 12, 6, 6, 8, 8, 10, 10];
+static num_pels_log2_lookup: [u8; BlockSize::BLOCK_SIZES_ALL] = [
+  4, 5, 5, 6, 7, 7, 8, 9, 9, 10, 11, 11, 12, 13, 13, 14, 6, 6, 8, 8, 10, 10, 12, 12];
 
-pub static subsize_lookup: [[BlockSize; BlockSize::BLOCK_SIZES_ALL]; PARTITION_TYPES] =
+pub static subsize_lookup: [[BlockSize; BlockSize::BLOCK_SIZES_ALL]; EXT_PARTITION_TYPES] =
 [
-  [ // PARTITION_NONE
+  [     // PARTITION_NONE
     //                            4X4
                                   BLOCK_4X4,
     // 4X8,        8X4,           8X8
@@ -218,10 +231,14 @@ pub static subsize_lookup: [[BlockSize; BlockSize::BLOCK_SIZES_ALL]; PARTITION_T
     BLOCK_16X32,   BLOCK_32X16,   BLOCK_32X32,
     // 32X64,      64X32,         64X64
     BLOCK_32X64,   BLOCK_64X32,   BLOCK_64X64,
+    // 64x128,     128x64,        128x128
+    BLOCK_64X128,  BLOCK_128X64,  BLOCK_128X128,
     // 4X16,       16X4,          8X32
     BLOCK_4X16,    BLOCK_16X4,    BLOCK_8X32,
     // 32X8,       16X64,         64X16
     BLOCK_32X8,    BLOCK_16X64,   BLOCK_64X16,
+    // 32x128,     128x32
+    BLOCK_32X128,  BLOCK_128X32
   ], [  // PARTITION_HORZ
     //                            4X4
                                   BLOCK_INVALID,
@@ -233,10 +250,14 @@ pub static subsize_lookup: [[BlockSize; BlockSize::BLOCK_SIZES_ALL]; PARTITION_T
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X16,
     // 32X64,      64X32,         64X64
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X32,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_128X64,
     // 4X16,       16X4,          8X32
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
     // 32X8,       16X64,         64X16
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
   ], [  // PARTITION_VERT
     //                            4X4
                                   BLOCK_INVALID,
@@ -248,10 +269,14 @@ pub static subsize_lookup: [[BlockSize; BlockSize::BLOCK_SIZES_ALL]; PARTITION_T
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X32,
     // 32X64,      64X32,         64X64
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X64,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X128,
     // 4X16,       16X4,          8X32
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
     // 32X8,       16X64,         64X16
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
   ], [  // PARTITION_SPLIT
     //                            4X4
                                   BLOCK_INVALID,
@@ -263,10 +288,128 @@ pub static subsize_lookup: [[BlockSize; BlockSize::BLOCK_SIZES_ALL]; PARTITION_T
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X16,
     // 32X64,      64X32,         64X64
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X32,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X64,
     // 4X16,       16X4,          8X32
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
     // 32X8,       16X64,         64X16
     BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
+  ], [  // PARTITION_HORZ_A
+    //                            4X4
+                                  BLOCK_INVALID,
+    // 4X8,        8X4,           8X8
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_8X4,
+    // 8X16,       16X8,          16X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X8,
+    // 16X32,      32X16,         32X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X16,
+    // 32X64,      64X32,         64X64
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X32,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_128X64,
+    // 4X16,       16X4,          8X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32X8,       16X64,         64X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
+  ], [  // PARTITION_HORZ_B
+    //                            4X4
+                                  BLOCK_INVALID,
+    // 4X8,        8X4,           8X8
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_8X4,
+    // 8X16,       16X8,          16X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X8,
+    // 16X32,      32X16,         32X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X16,
+    // 32X64,      64X32,         64X64
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X32,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_128X64,
+    // 4X16,       16X4,          8X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32X8,       16X64,         64X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
+  ], [  // PARTITION_VERT_A
+    //                            4X4
+                                  BLOCK_INVALID,
+    // 4X8,        8X4,           8X8
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_4X8,
+    // 8X16,       16X8,          16X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_8X16,
+    // 16X32,      32X16,         32X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X32,
+    // 32X64,      64X32,         64X64
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X64,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X128,
+    // 4X16,       16X4,          8X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32X8,       16X64,         64X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
+  ], [  // PARTITION_VERT_B
+    //                            4X4
+                                  BLOCK_INVALID,
+    // 4X8,        8X4,           8X8
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_4X8,
+    // 8X16,       16X8,          16X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_8X16,
+    // 16X32,      32X16,         32X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X32,
+    // 32X64,      64X32,         64X64
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X64,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X128,
+    // 4X16,       16X4,          8X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32X8,       16X64,         64X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
+  ], [  // PARTITION_HORZ_4
+    //                            4X4
+                                  BLOCK_INVALID,
+    // 4X8,        8X4,           8X8
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 8X16,       16X8,          16X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X4,
+    // 16X32,      32X16,         32X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X8,
+    // 32X64,      64X32,         64X64
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_64X16,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_128X32,
+    // 4X16,       16X4,          8X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32X8,       16X64,         64X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
+  ], [  // PARTITION_VERT_4
+    //                            4X4
+                                  BLOCK_INVALID,
+    // 4X8,        8X4,           8X8
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 8X16,       16X8,          16X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_4X16,
+    // 16X32,      32X16,         32X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_8X32,
+    // 32X64,      64X32,         64X64
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_16X64,
+    // 64x128,     128x64,        128x128
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_32X128,
+    // 4X16,       16X4,          8X32
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32X8,       16X64,         64X16
+    BLOCK_INVALID, BLOCK_INVALID, BLOCK_INVALID,
+    // 32x128,     128x32
+    BLOCK_INVALID, BLOCK_INVALID
   ]
 ];
 
@@ -303,7 +446,7 @@ const INTRA_INTER_CONTEXTS: usize = 4;
 // Level Map
 const TXB_SKIP_CONTEXTS: usize =  13;
 
-const EOB_COEF_CONTEXTS: usize =  22;
+const EOB_COEF_CONTEXTS: usize =  9;
 
 const SIG_COEF_CONTEXTS_2D: usize =  26;
 const SIG_COEF_CONTEXTS_1D: usize =  16;
@@ -692,7 +835,7 @@ pub fn uv_intra_mode_to_tx_type_context(pred: PredictionMode) -> TxType {
 
 extern "C" {
   static default_partition_cdf:
-    [[u16; PARTITION_TYPES + 1]; PARTITION_CONTEXTS];
+    [[u16; EXT_PARTITION_TYPES + 1]; PARTITION_CONTEXTS];
   static default_kf_y_mode_cdf:
     [[[u16; INTRA_MODES + 1]; KF_MODE_CONTEXTS]; KF_MODE_CONTEXTS];
   static default_if_y_mode_cdf: [[u16; INTRA_MODES + 1]; BLOCK_SIZE_GROUPS];
@@ -705,9 +848,9 @@ extern "C" {
   static default_intra_inter_cdf: [[u16; 3]; INTRA_INTER_CONTEXTS];
   static default_angle_delta_cdf:
     [[u16; 2 * MAX_ANGLE_DELTA + 1 + 1]; DIRECTIONAL_MODES];
-  static default_filter_intra_cdfs: [[u16; 3]; TxSize::TX_SIZES_ALL];
+  static default_filter_intra_cdfs: [[u16; 3]; BlockSize::BLOCK_SIZES_ALL];
 
-  static av1_inter_scan_orders: [[SCAN_ORDER; TX_TYPES]; TxSize::TX_SIZES_ALL];
+  static av1_scan_orders: [[SCAN_ORDER; TX_TYPES]; TxSize::TX_SIZES_ALL];
 
   // lv_map
   static av1_default_txb_skip_cdfs:
@@ -744,7 +887,7 @@ pub struct SCAN_ORDER {
 
 #[derive(Clone)]
 pub struct CDFContext {
-  partition_cdf: [[u16; PARTITION_TYPES + 1]; PARTITION_CONTEXTS],
+  partition_cdf: [[u16; EXT_PARTITION_TYPES + 1]; PARTITION_CONTEXTS],
   kf_y_cdf: [[[u16; INTRA_MODES + 1]; KF_MODE_CONTEXTS]; KF_MODE_CONTEXTS],
   y_mode_cdf: [[u16; INTRA_MODES + 1]; BLOCK_SIZE_GROUPS],
   uv_mode_cdf: [[[u16; UV_INTRA_MODES + 1]; INTRA_MODES]; 2],
@@ -754,7 +897,7 @@ pub struct CDFContext {
   skip_cdfs: [[u16; 3]; SKIP_CONTEXTS],
   intra_inter_cdfs: [[u16; 3]; INTRA_INTER_CONTEXTS],
   angle_delta_cdf: [[u16; 2 * MAX_ANGLE_DELTA + 1 + 1]; DIRECTIONAL_MODES],
-  filter_intra_cdfs: [[u16; 3]; TxSize::TX_SIZES_ALL],
+  filter_intra_cdfs: [[u16; 3]; BlockSize::BLOCK_SIZES_ALL],
 
   // lv_map
   txb_skip_cdf: [[[u16; 3]; TXB_SKIP_CONTEXTS]; TxSize::TX_SIZES],
@@ -1017,7 +1160,8 @@ pub struct Block {
   pub mode: PredictionMode,
   pub bsize: BlockSize,
   pub partition: PartitionType,
-  pub skip: bool
+  pub skip: bool,
+  pub cdef_index: u8
 }
 
 impl Block {
@@ -1026,7 +1170,8 @@ impl Block {
       mode: PredictionMode::DC_PRED,
       bsize: BlockSize::BLOCK_64X64,
       partition: PartitionType::PARTITION_NONE,
-      skip: false
+      skip: false,
+      cdef_index: 0
     }
   }
   pub fn is_inter(&self) -> bool {
@@ -1043,6 +1188,7 @@ pub struct TXB_CTX {
 pub struct BlockContext {
   pub cols: usize,
   pub rows: usize,
+  pub cdef_coded: bool,
   above_partition_context: Vec<u8>,
   left_partition_context: [u8; MAX_MIB_SIZE],
   above_coeff_context: [Vec<u8>; PLANES],
@@ -1058,6 +1204,7 @@ impl BlockContext {
     BlockContext {
       cols,
       rows,
+      cdef_coded: false,
       above_partition_context: vec![0; aligned_cols],
       left_partition_context: [0; MAX_MIB_SIZE],
       above_coeff_context: [
@@ -1074,6 +1221,7 @@ impl BlockContext {
     BlockContext {
       cols: self.cols,
       rows: self.rows,
+      cdef_coded: self.cdef_coded,
       above_partition_context: self.above_partition_context.clone(),
       left_partition_context: self.left_partition_context,
       above_coeff_context: self.above_coeff_context.clone(),
@@ -1085,6 +1233,7 @@ impl BlockContext {
   pub fn rollback(&mut self, checkpoint: &BlockContext) {
     self.cols = checkpoint.cols;
     self.rows = checkpoint.rows;
+    self.cdef_coded = checkpoint.cdef_coded;
     self.above_partition_context = checkpoint.above_partition_context.clone();
     self.left_partition_context = checkpoint.left_partition_context;
     self.above_coeff_context = checkpoint.above_coeff_context.clone();
@@ -1108,6 +1257,19 @@ impl BlockContext {
       self.blocks[bo.y][bo.x - 1]
     } else {
       Block::default()
+    }
+  }
+
+  pub fn for_each<F>(&mut self, bo: &BlockOffset, bsize: BlockSize, f: F) -> ()
+  where
+    F: Fn(&mut Block) -> ()
+  {
+    let bw = bsize.width_mi();
+    let bh = bsize.height_mi();
+    for y in 0..bh {
+      for x in 0..bw {
+        f(&mut self.blocks[bo.y + y as usize][bo.x + x as usize]);
+      }
     }
   }
 
@@ -1200,14 +1362,7 @@ impl BlockContext {
   pub fn set_mode(
     &mut self, bo: &BlockOffset, bsize: BlockSize, mode: PredictionMode
   ) {
-    let bw = bsize.width_mi();
-    let bh = bsize.height_mi();
-
-    for y in 0..bh {
-      for x in 0..bw {
-        self.blocks[bo.y + y as usize][bo.x + x as usize].mode = mode;
-      }
-    }
+    self.for_each(bo, bsize, |block| block.mode = mode);
   }
 
   pub fn get_mode(&mut self, bo: &BlockOffset) -> PredictionMode {
@@ -1268,14 +1423,11 @@ impl BlockContext {
   }
 
   pub fn set_skip(&mut self, bo: &BlockOffset, bsize: BlockSize, skip: bool) {
-    let bw = bsize.width_mi();
-    let bh = bsize.height_mi();
+    self.for_each(bo, bsize, |block| block.skip = skip);
+  }
 
-    for y in 0..bh {
-      for x in 0..bw {
-        self.blocks[bo.y + y as usize][bo.x + x as usize].skip = skip;
-      }
-    }
+  pub fn set_cdef(&mut self, bo: &BlockOffset, bsize: BlockSize, cdef_index: u8) {
+    self.for_each(bo, bsize, |block| block.cdef_index = cdef_index);
   }
 
   // The mode info data structure has a one element border above and to the
@@ -1434,8 +1586,8 @@ impl FieldMap {
 }
 
 macro_rules! symbol {
-  ($self:ident, $s:expr, $cdf:expr) => {
-    $self.w.symbol($s, $cdf);
+  ($self:ident, $w:ident, $s:expr, $cdf:expr) => {
+    $w.symbol($s, $cdf);
     #[cfg(debug)] {
       if let Some(map) = $self.fc_map.as_ref() {
         map.lookup($cdf.as_ptr() as usize);
@@ -1446,13 +1598,11 @@ macro_rules! symbol {
 
 #[derive(Clone)]
 pub struct ContextWriterCheckpoint {
-  pub w: ec::WriterCheckpoint,
   pub fc: CDFContext,
   pub bc: BlockContext
 }
 
 pub struct ContextWriter {
-  pub w: ec::Writer,
   pub bc: BlockContext,
   fc: CDFContext,
   #[cfg(debug)]
@@ -1460,10 +1610,9 @@ pub struct ContextWriter {
 }
 
 impl ContextWriter {
-  pub fn new(w: ec::Writer, fc: CDFContext, bc: BlockContext) -> Self {
+  pub fn new(fc: CDFContext, bc: BlockContext) -> Self {
     #[allow(unused_mut)]
     let mut cw = ContextWriter {
-      w,
       fc,
       bc,
       #[cfg(debug)]
@@ -1500,6 +1649,22 @@ impl ContextWriter {
       cdf_in,
       PartitionType::PARTITION_SPLIT as usize
     );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_HORZ_A as usize
+    );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_HORZ_B as usize
+    );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_VERT_A as usize
+    );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_HORZ_4 as usize
+    );
     out[0] = 32768 - out[0];
     out[1] = 0;
   }
@@ -1516,46 +1681,69 @@ impl ContextWriter {
       cdf_in,
       PartitionType::PARTITION_SPLIT as usize
     );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_HORZ_A as usize
+    );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_VERT_A as usize
+    );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_VERT_B as usize
+    );
+    out[0] -= ContextWriter::cdf_element_prob(
+      cdf_in,
+      PartitionType::PARTITION_VERT_4 as usize
+    );
     out[0] = 32768 - out[0];
     out[1] = 0;
   }
 
   pub fn write_partition(
-    &mut self, bo: &BlockOffset, p: PartitionType, bsize: BlockSize
+    &mut self, w: &mut Writer, bo: &BlockOffset, p: PartitionType, bsize: BlockSize
   ) {
+    assert!(bsize >= BlockSize::BLOCK_8X8 );
     let hbs = bsize.width_mi() / 2;
     let has_cols = (bo.x + hbs) < self.bc.cols;
     let has_rows = (bo.y + hbs) < self.bc.rows;
     let ctx = self.bc.partition_plane_context(&bo, bsize);
     assert!(ctx < PARTITION_CONTEXTS);
-    let partition_cdf = &mut self.fc.partition_cdf[ctx];
+    let partition_cdf = if bsize <= BlockSize::BLOCK_8X8 {
+      &mut self.fc.partition_cdf[ctx][..PARTITION_TYPES+1]
+    } else {
+      &mut self.fc.partition_cdf[ctx]
+    };
 
     if !has_rows && !has_cols {
       return;
     }
 
     if has_rows && has_cols {
-      symbol!(self, p as u32, partition_cdf);
+      symbol!(self, w, p as u32, partition_cdf);
     } else if !has_rows && has_cols {
+      assert!(bsize > BlockSize::BLOCK_8X8);
       let mut cdf = [0u16; 2];
       ContextWriter::partition_gather_vert_alike(
         &mut cdf,
         partition_cdf,
         bsize
       );
-      self.w.cdf((p == PartitionType::PARTITION_SPLIT) as u32, &cdf);
+      w.cdf((p == PartitionType::PARTITION_SPLIT) as u32, &cdf);
     } else {
+      assert!(bsize > BlockSize::BLOCK_8X8);
       let mut cdf = [0u16; 2];
       ContextWriter::partition_gather_horz_alike(
         &mut cdf,
         partition_cdf,
         bsize
       );
-      self.w.cdf((p == PartitionType::PARTITION_SPLIT) as u32, &cdf);
+      w.cdf((p == PartitionType::PARTITION_SPLIT) as u32, &cdf);
     }
   }
   pub fn write_intra_mode_kf(
-    &mut self, bo: &BlockOffset, mode: PredictionMode
+    &mut self, w: &mut Writer, bo: &BlockOffset, mode: PredictionMode
   ) {
     static intra_mode_context: [usize; INTRA_MODES] =
       [0, 1, 2, 3, 4, 4, 4, 4, 3, 0, 1, 2, 0];
@@ -1564,38 +1752,39 @@ impl ContextWriter {
     let above_ctx = intra_mode_context[above_mode];
     let left_ctx = intra_mode_context[left_mode];
     let cdf = &mut self.fc.kf_y_cdf[above_ctx][left_ctx];
-    symbol!(self, mode as u32, cdf);
+    symbol!(self, w, mode as u32, cdf);
   }
-  pub fn write_intra_mode(&mut self, bsize: BlockSize, mode: PredictionMode) {
+  pub fn write_intra_mode(&mut self, w: &mut Writer, bsize: BlockSize, mode: PredictionMode) {
     let cdf =
       &mut self.fc.y_mode_cdf[size_group_lookup[bsize as usize] as usize];
-    symbol!(self, mode as u32, cdf);
+    symbol!(self, w, mode as u32, cdf);
   }
   pub fn write_intra_uv_mode(
-    &mut self, uv_mode: PredictionMode, y_mode: PredictionMode, bs: BlockSize
+    &mut self, w: &mut Writer, uv_mode: PredictionMode, y_mode: PredictionMode, bs: BlockSize
   ) {
     let cdf =
       &mut self.fc.uv_mode_cdf[bs.cfl_allowed() as usize][y_mode as usize];
     if bs.cfl_allowed() {
-      symbol!(self, uv_mode as u32, cdf);
+      symbol!(self, w, uv_mode as u32, cdf);
     } else {
-      symbol!(self, uv_mode as u32, &mut cdf[..UV_INTRA_MODES]);
+      symbol!(self, w, uv_mode as u32, &mut cdf[..UV_INTRA_MODES]);
     }
   }
-  pub fn write_angle_delta(&mut self, angle: i8, mode: PredictionMode) {
+  pub fn write_angle_delta(&mut self, w: &mut Writer, angle: i8, mode: PredictionMode) {
     symbol!(
       self,
+      w,
       (angle + MAX_ANGLE_DELTA as i8) as u32,
       &mut self.fc.angle_delta_cdf
         [mode as usize - PredictionMode::V_PRED as usize]
     );
   }
-  pub fn write_use_filter_intra(&mut self, enable: bool, tx_size: TxSize) {
-    symbol!(self, enable as u32, &mut self.fc.filter_intra_cdfs[tx_size as usize]);
+  pub fn write_use_filter_intra(&mut self, w: &mut Writer, enable: bool, block_size: BlockSize) {
+    symbol!(self, w, enable as u32, &mut self.fc.filter_intra_cdfs[block_size as usize]);
   }
 
   pub fn write_tx_type(
-    &mut self, tx_size: TxSize, tx_type: TxType, y_mode: PredictionMode,
+    &mut self, w: &mut Writer, tx_size: TxSize, tx_type: TxType, y_mode: PredictionMode,
     is_inter: bool, use_reduced_tx_set: bool
   ) {
     let square_tx_size = tx_size.sqr();
@@ -1611,6 +1800,7 @@ impl ContextWriter {
       if is_inter {
         symbol!(
           self,
+          w,
           av1_tx_ind[tx_set as usize][tx_type as usize] as u32,
           &mut self.fc.inter_tx_cdf[tx_set_index as usize]
             [square_tx_size as usize]
@@ -1624,6 +1814,7 @@ impl ContextWriter {
 
         symbol!(
           self,
+          w,
           av1_tx_ind[tx_set as usize][tx_type as usize] as u32,
           &mut self.fc.intra_tx_cdf[tx_set_index as usize]
             [square_tx_size as usize][intra_dir as usize]
@@ -1632,13 +1823,27 @@ impl ContextWriter {
       }
     }
   }
-  pub fn write_skip(&mut self, bo: &BlockOffset, skip: bool) {
+  pub fn write_skip(&mut self, w: &mut Writer, bo: &BlockOffset, skip: bool) {
     let ctx = self.bc.skip_context(bo);
-    symbol!(self, skip as u32, &mut self.fc.skip_cdfs[ctx]);
+    symbol!(self, w, skip as u32, &mut self.fc.skip_cdfs[ctx]);
   }
-  pub fn write_is_inter(&mut self, bo: &BlockOffset, is_inter: bool) {
+
+  pub fn write_block_cdef(&mut self, w: &mut Writer, bo: &BlockOffset, skip: bool, strength_index: u8, bits: u8) {
+    // Starting a new superblock-- we have to keep track as we don't code
+    // a cdef strength until the first non-skip block
+    let block_mask = (1<<SUPERBLOCK_TO_BLOCK_SHIFT) - 1;
+    if (bo.x & block_mask) == 0 && (bo.y & block_mask) == 0 {
+      self.bc.cdef_coded = false;
+    }
+    if !self.bc.cdef_coded && !skip {
+      self.bc.cdef_coded = true;
+      w.literal(bits, strength_index as u32);
+    }
+  }
+
+  pub fn write_is_inter(&mut self, w: &mut Writer, bo: &BlockOffset, is_inter: bool) {
     let ctx = self.bc.intra_inter_context(bo);
-    symbol!(self, is_inter as u32, &mut self.fc.intra_inter_cdfs[ctx]);
+    symbol!(self, w, is_inter as u32, &mut self.fc.intra_inter_cdfs[ctx]);
   }
 
   pub fn get_txsize_entropy_ctx(&mut self, tx_size: TxSize) -> usize {
@@ -1871,7 +2076,7 @@ impl ContextWriter {
   }
 
   pub fn write_coeffs_lv_map(
-    &mut self, plane: usize, bo: &BlockOffset, coeffs_in: &[i32],
+    &mut self, w: &mut Writer, plane: usize, bo: &BlockOffset, coeffs_in: &[i32],
     tx_size: TxSize, tx_type: TxType, plane_bsize: BlockSize, xdec: usize,
     ydec: usize, use_reduced_tx_set: bool
   ) {
@@ -1880,7 +2085,7 @@ impl ContextWriter {
     assert!(!is_inter);
     // TODO: If iner mode, scan_order should use inter version of them
     let scan_order =
-      &av1_inter_scan_orders[tx_size as usize][tx_type as usize];
+      &av1_scan_orders[tx_size as usize][tx_type as usize];
     let scan = scan_order.scan;
     let mut coeffs_storage = [0 as i32; 32 * 32];
     let coeffs = &mut coeffs_storage[..tx_size.area()];
@@ -1907,7 +2112,7 @@ impl ContextWriter {
 
     {
       let cdf = &mut self.fc.txb_skip_cdf[txs_ctx][txb_ctx.txb_skip_ctx];
-      symbol!(self, (eob == 0) as u32, cdf);
+      symbol!(self, w, (eob == 0) as u32, cdf);
     }
 
     if eob == 0 {
@@ -1934,6 +2139,7 @@ impl ContextWriter {
     // Signal tx_type for luma plane only
     if plane == 0 {
       self.write_tx_type(
+        w,
         tx_size,
         tx_type,
         pred_mode,
@@ -1956,6 +2162,7 @@ impl ContextWriter {
       0 => {
         symbol!(
           self,
+          w,
           eob_pt - 1,
           &mut self.fc.eob_flag_cdf16[plane_type][eob_multi_ctx]
         );
@@ -1963,6 +2170,7 @@ impl ContextWriter {
       1 => {
         symbol!(
           self,
+          w,
           eob_pt - 1,
           &mut self.fc.eob_flag_cdf32[plane_type][eob_multi_ctx]
         );
@@ -1970,6 +2178,7 @@ impl ContextWriter {
       2 => {
         symbol!(
           self,
+          w,
           eob_pt - 1,
           &mut self.fc.eob_flag_cdf64[plane_type][eob_multi_ctx]
         );
@@ -1977,6 +2186,7 @@ impl ContextWriter {
       3 => {
         symbol!(
           self,
+          w,
           eob_pt - 1,
           &mut self.fc.eob_flag_cdf128[plane_type][eob_multi_ctx]
         );
@@ -1984,6 +2194,7 @@ impl ContextWriter {
       4 => {
         symbol!(
           self,
+          w,
           eob_pt - 1,
           &mut self.fc.eob_flag_cdf256[plane_type][eob_multi_ctx]
         );
@@ -1991,6 +2202,7 @@ impl ContextWriter {
       5 => {
         symbol!(
           self,
+          w,
           eob_pt - 1,
           &mut self.fc.eob_flag_cdf512[plane_type][eob_multi_ctx]
         );
@@ -1998,6 +2210,7 @@ impl ContextWriter {
       _ => {
         symbol!(
           self,
+          w,
           eob_pt - 1,
           &mut self.fc.eob_flag_cdf1024[plane_type][eob_multi_ctx]
         );
@@ -2015,8 +2228,9 @@ impl ContextWriter {
       } as u32;
       symbol!(
         self,
+        w,
         bit,
-        &mut self.fc.eob_extra_cdf[txs_ctx][plane_type][eob_pt as usize]
+        &mut self.fc.eob_extra_cdf[txs_ctx][plane_type][(eob_pt - 3) as usize]
       );
       for i in 1..eob_offset_bits {
         eob_shift = eob_offset_bits as u16 - 1 - i as u16;
@@ -2025,7 +2239,7 @@ impl ContextWriter {
         } else {
           0
         };
-        self.w.bit(bit as u16);
+        w.bit(bit as u16);
       }
     }
 
@@ -2044,9 +2258,6 @@ impl ContextWriter {
 
     let bwl = self.get_txb_bwl(tx_size);
 
-    let mut update_pos = [0; MAX_TX_SQUARE];
-    let mut num_updates = 0;
-
     for c in (0..eob).rev() {
       let pos = scan[c];
       let coeff_ctx = coeff_contexts[pos as usize];
@@ -2056,6 +2267,7 @@ impl ContextWriter {
       if c == eob - 1 {
         symbol!(
           self,
+          w,
           (cmp::min(level, 3) - 1) as u32,
           &mut self.fc.coeff_base_eob_cdf[txs_ctx][plane_type]
             [coeff_ctx as usize]
@@ -2063,6 +2275,7 @@ impl ContextWriter {
       } else {
         symbol!(
           self,
+          w,
           (cmp::min(level, 3)) as u32,
           &mut self.fc.coeff_base_cdf[txs_ctx][plane_type][coeff_ctx as usize]
         );
@@ -2088,6 +2301,7 @@ impl ContextWriter {
           let k = cmp::min(base_range - idx as u16, BR_CDF_SIZE as u16 - 1);
           symbol!(
             self,
+            w,
             k as u32,
             &mut self.fc.coeff_br_cdf
               [cmp::min(txs_ctx, TxSize::TX_32X32 as usize)][plane_type]
@@ -2119,27 +2333,23 @@ impl ContextWriter {
       if c == 0 {
         symbol!(
           self,
+          w,
           sign,
           &mut self.fc.dc_sign_cdf[plane_type][txb_ctx.dc_sign_ctx]
         );
       } else {
-        self.w.bit(sign as u16);
+        w.bit(sign as u16);
       }
       // save extra golomb codes for separate loop
       if level > (COEFF_BASE_RANGE + NUM_BASE_LEVELS) as u32 {
         let pos = scan[c];
-        update_pos[num_updates] = pos;
-        num_updates += 1;
+        w.write_golomb(
+          coeffs_in[pos as usize].abs() as u16
+            - COEFF_BASE_RANGE as u16
+            - 1
+            - NUM_BASE_LEVELS as u16
+        );
       }
-    }
-
-    for i in 0..num_updates {
-      self.w.write_golomb(
-        coeffs_in[update_pos[i] as usize].abs() as u16
-          - COEFF_BASE_RANGE as u16
-          - 1
-          - NUM_BASE_LEVELS as u16
-      );
     }
 
     cul_level = cmp::min(COEFF_CONTEXT_MASK as u32, cul_level);
@@ -2151,14 +2361,12 @@ impl ContextWriter {
 
   pub fn checkpoint(&mut self) -> ContextWriterCheckpoint {
     ContextWriterCheckpoint {
-      w: self.w.checkpoint(),
       fc: self.fc.clone(),
       bc: self.bc.checkpoint()
     }
   }
 
   pub fn rollback(&mut self, checkpoint: &ContextWriterCheckpoint) {
-    self.w.rollback(&checkpoint.w);
     self.fc = checkpoint.fc.clone();
     self.bc.rollback(&checkpoint.bc);
     #[cfg(debug)] {

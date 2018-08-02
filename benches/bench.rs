@@ -9,10 +9,10 @@
 
 #[macro_use]
 extern crate bencher;
-extern crate libc;
 extern crate rand;
 extern crate rav1e;
 
+<<<<<<< HEAD
 use bencher::*;
 use rand::{ChaChaRng, Rng, SeedableRng};
 use rav1e::context::*;
@@ -504,11 +504,19 @@ fn intra_smooth_v_pred_aom(b: &mut Bencher) {
     }
   })
 }
+=======
+mod predict;
+>>>>>>> master
 
+use bencher::*;
+use rav1e::*;
 use rav1e::context::*;
 use rav1e::ec;
 use rav1e::partition::*;
-use rav1e::*;
+use rav1e::predict::*;
+
+#[cfg(feature = "comparative_bench")]
+mod comparative;
 
 struct WriteB {
   tx_size: TxSize,
@@ -548,11 +556,11 @@ fn write_b_bench(b: &mut Bencher, tx_size: TxSize, qindex: usize) {
   let config =
     EncoderConfig { quantizer: qindex, speed: 10, ..Default::default() };
   let mut fi = FrameInvariants::new(1024, 1024, config);
-  let w = ec::Writer::new();
+  let mut w = ec::Writer::new();
   let fc = CDFContext::new(fi.config.quantizer as u8);
   let bc = BlockContext::new(fi.sb_width * 16, fi.sb_height * 16);
   let mut fs = FrameState::new(&fi);
-  let mut cw = ContextWriter::new(w, fc, bc);
+  let mut cw = ContextWriter::new(fc, bc);
 
   let tx_type = TxType::DCT_DCT;
 
@@ -576,6 +584,7 @@ fn write_b_bench(b: &mut Bencher, tx_size: TxSize, qindex: usize) {
               &mut fi,
               &mut fs,
               &mut cw,
+              &mut w,
               p,
               &bo,
               mode,
@@ -618,23 +627,20 @@ fn nn_pred_aom(b: &mut Bencher) {
 }
 
 benchmark_group!(
-  intra,
-  intra_dc_pred_native,
-  intra_dc_pred_aom,
-  intra_h_pred_native,
-  intra_h_pred_aom,
-  intra_v_pred_native,
-  intra_v_pred_aom,
-  intra_paeth_pred_native,
-  intra_paeth_pred_aom,
-  intra_smooth_pred_native,
-  intra_smooth_pred_aom,
-  intra_smooth_h_pred_native,
-  intra_smooth_h_pred_aom,
-  intra_smooth_v_pred_native,
-  intra_smooth_v_pred_aom
+  intra_prediction,
+  predict::intra_dc_4x4,
+  predict::intra_h_4x4,
+  predict::intra_v_4x4,
+  predict::intra_paeth_4x4,
+  predict::intra_smooth_4x4,
+  predict::intra_smooth_h_4x4,
+  predict::intra_smooth_v_4x4
 );
 
 benchmark_group!(ml, nn_pred_native, nn_pred_aom);
 
-benchmark_main!(intra, write_b, ml);
+#[cfg(feature = "comparative_bench")]
+benchmark_main!(comparative::intra_prediction);
+
+#[cfg(not(feature = "comparative_bench"))]
+benchmark_main!(write_b, intra_prediction, ml);

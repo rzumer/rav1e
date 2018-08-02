@@ -16,6 +16,7 @@ use libc;
 use context::MAX_TX_SIZE;
 use partition::*;
 use std::mem::*;
+use context::INTRA_MODES;
 
 pub static RAV1E_INTRA_MODES: &'static [PredictionMode] = &[
   PredictionMode::DC_PRED,
@@ -60,6 +61,33 @@ static sm_weight_arrays: [u8; 2 * MAX_TX_SIZE] = [
     150, 144, 138, 133, 127, 121, 116, 111, 106, 101, 96, 91, 86, 82, 77, 73, 69,
     65, 61, 57, 54, 50, 47, 44, 41, 38, 35, 32, 29, 27, 25, 22, 20, 18, 16, 15,
     13, 12, 10, 9, 8, 7, 6, 6, 5, 5, 4, 4, 4,*/
+];
+
+
+const NEED_LEFT: u8 = 1 << 1;
+const NEED_ABOVE: u8 = 1 << 2;
+const NEED_ABOVERIGHT: u8 = 1 << 3;
+const NEED_ABOVELEFT: u8 = 1 << 4;
+const NEED_BOTTOMLEFT: u8 = 1 << 5;
+
+/*const INTRA_EDGE_FILT: usize = 3;
+const INTRA_EDGE_TAPS: usize = 5;
+const MAX_UPSAMPLE_SZ: usize = 16;*/
+
+pub static extend_modes: [u8; INTRA_MODES] = [
+  NEED_ABOVE | NEED_LEFT,                   // DC
+  NEED_ABOVE,                               // V
+  NEED_LEFT,                                // H
+  NEED_ABOVE | NEED_ABOVERIGHT,             // D45
+  NEED_LEFT | NEED_ABOVE | NEED_ABOVELEFT,  // D135
+  NEED_LEFT | NEED_ABOVE | NEED_ABOVELEFT,  // D113
+  NEED_LEFT | NEED_ABOVE | NEED_ABOVELEFT,  // D157
+  NEED_LEFT | NEED_BOTTOMLEFT,              // D203
+  NEED_ABOVE | NEED_ABOVERIGHT,             // D67
+  NEED_LEFT | NEED_ABOVE,                   // SMOOTH
+  NEED_LEFT | NEED_ABOVE,                   // SMOOTH_V
+  NEED_LEFT | NEED_ABOVE,                   // SMOOTH_H
+  NEED_LEFT | NEED_ABOVE | NEED_ABOVELEFT,  // PAETH
 ];
 
 extern {
@@ -150,6 +178,7 @@ impl Dim for Block32x32 {
 }
 
 pub trait Intra: Dim {
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_dc(output: &mut [u16], stride: usize, above: &[u16], left: &[u16]) {
     let edges = left[..Self::H].iter().chain(above[..Self::W].iter());
     let len = (Self::W + Self::H) as u32;
@@ -163,6 +192,7 @@ pub trait Intra: Dim {
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_dc_128(output: &mut [u16], stride: usize) {
     for y in 0..Self::H {
       for x in 0..Self::W {
@@ -171,6 +201,7 @@ pub trait Intra: Dim {
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_dc_left(
     output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
   ) {
@@ -187,6 +218,7 @@ pub trait Intra: Dim {
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_dc_top(
     output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
   ) {
@@ -203,6 +235,7 @@ pub trait Intra: Dim {
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_h(output: &mut [u16], stride: usize, left: &[u16]) {
     for (line, l) in output.chunks_mut(stride).zip(left[..Self::H].iter()) {
       for v in &mut line[..Self::W] {
@@ -211,12 +244,14 @@ pub trait Intra: Dim {
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_v(output: &mut [u16], stride: usize, above: &[u16]) {
     for line in output.chunks_mut(stride).take(Self::H) {
       line[..Self::W].clone_from_slice(&above[..Self::W])
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_paeth(
     output: &mut [u16], stride: usize, above: &[u16], left: &[u16],
     above_left: u16
@@ -247,8 +282,9 @@ pub trait Intra: Dim {
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_smooth(
-    output: &mut [u16], stride: usize, above: &[u16], left: &[u16], bd: u8
+    output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
   ) {
     let below_pred = left[Self::H - 1]; // estimated by bottom-left pixel
     let right_pred = above[Self::W - 1]; // estimated by top-right pixel
@@ -292,13 +328,14 @@ pub trait Intra: Dim {
         let output_index = r * stride + c;
 
         // Clamp the output to the correct bit depth
-        output[output_index] = this_pred.max(0).min((1_u32 << bd) - 1) as u16;
+        output[output_index] = this_pred as u16;
       }
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_smooth_h(
-    output: &mut [u16], stride: usize, above: &[u16], left: &[u16], bd: u8
+    output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
   ) {
     let right_pred = above[Self::W - 1]; // estimated by top-right pixel
     let sm_weights = &sm_weight_arrays[Self::W..];
@@ -328,13 +365,14 @@ pub trait Intra: Dim {
         let output_index = r * stride + c;
 
         // Clamp the output to the correct bit depth
-        output[output_index] = this_pred.max(0).min((1_u32 << bd) - 1) as u16;
+        output[output_index] = this_pred as u16;
       }
     }
   }
 
+  #[cfg_attr(feature = "comparative_bench", inline(never))]
   fn pred_smooth_v(
-    output: &mut [u16], stride: usize, above: &[u16], left: &[u16], bd: u8
+    output: &mut [u16], stride: usize, above: &[u16], left: &[u16]
   ) {
     let below_pred = left[Self::H - 1]; // estimated by bottom-left pixel
     let sm_weights = &sm_weight_arrays[Self::H..];
@@ -364,7 +402,7 @@ pub trait Intra: Dim {
         let output_index = r * stride + c;
 
         // Clamp the output to the correct bit depth
-        output[output_index] = this_pred.max(0).min((1_u32 << bd) - 1) as u16;
+        output[output_index] = this_pred as u16;
       }
     }
   }
@@ -548,7 +586,7 @@ pub mod test {
     let (above, left, mut o1, mut o2) = setup_pred(ra);
 
     pred_smooth_4x4(&mut o1, 32, &above[..4], &left[..4]);
-    Block4x4::pred_smooth(&mut o2, 32, &above[..4], &left[..4], 8);
+    Block4x4::pred_smooth(&mut o2, 32, &above[..4], &left[..4]);
 
     (o1, o2)
   }
@@ -557,7 +595,7 @@ pub mod test {
     let (above, left, mut o1, mut o2) = setup_pred(ra);
 
     pred_smooth_h_4x4(&mut o1, 32, &above[..4], &left[..4]);
-    Block4x4::pred_smooth_h(&mut o2, 32, &above[..4], &left[..4], 8);
+    Block4x4::pred_smooth_h(&mut o2, 32, &above[..4], &left[..4]);
 
     (o1, o2)
   }
@@ -566,7 +604,7 @@ pub mod test {
     let (above, left, mut o1, mut o2) = setup_pred(ra);
 
     pred_smooth_v_4x4(&mut o1, 32, &above[..4], &left[..4]);
-    Block4x4::pred_smooth_v(&mut o2, 32, &above[..4], &left[..4], 8);
+    Block4x4::pred_smooth_v(&mut o2, 32, &above[..4], &left[..4]);
 
     (o1, o2)
   }
@@ -658,7 +696,7 @@ pub mod test {
       }
     }
 
-    Block4x4::pred_smooth(&mut o, 32, &above[..4], &left[..4], 12);
+    Block4x4::pred_smooth(&mut o, 32, &above[..4], &left[..4]);
 
     for l in o.chunks(32).take(4) {
       for v in l[..4].iter() {
@@ -666,7 +704,7 @@ pub mod test {
       }
     }
 
-    Block4x4::pred_smooth_h(&mut o, 32, &above[..4], &left[..4], 12);
+    Block4x4::pred_smooth_h(&mut o, 32, &above[..4], &left[..4]);
 
     for l in o.chunks(32).take(4) {
       for v in l[..4].iter() {
@@ -674,7 +712,7 @@ pub mod test {
       }
     }
 
-    Block4x4::pred_smooth_v(&mut o, 32, &above[..4], &left[..4], 12);
+    Block4x4::pred_smooth_v(&mut o, 32, &above[..4], &left[..4]);
 
     for l in o.chunks(32).take(4) {
       for v in l[..4].iter() {

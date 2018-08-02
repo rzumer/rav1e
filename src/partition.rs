@@ -19,6 +19,12 @@ pub enum PartitionType {
   PARTITION_HORZ,
   PARTITION_VERT,
   PARTITION_SPLIT,
+  PARTITION_HORZ_A,  // HORZ split and the top partition is split again
+  PARTITION_HORZ_B,  // HORZ split and the bottom partition is split again
+  PARTITION_VERT_A,  // VERT split and the left partition is split again
+  PARTITION_VERT_B,  // VERT split and the right partition is split again
+  PARTITION_HORZ_4,  // 4:1 horizontal partition
+  PARTITION_VERT_4,  // 4:1 vertical partition
   PARTITION_INVALID
 }
 
@@ -37,23 +43,28 @@ pub enum BlockSize {
   BLOCK_32X64,
   BLOCK_64X32,
   BLOCK_64X64,
+  BLOCK_64X128,
+  BLOCK_128X64,
+  BLOCK_128X128,
   BLOCK_4X16,
   BLOCK_16X4,
   BLOCK_8X32,
   BLOCK_32X8,
   BLOCK_16X64,
   BLOCK_64X16,
+  BLOCK_32X128,
+  BLOCK_128X32,
   BLOCK_INVALID
 }
 
 impl BlockSize {
-  pub const BLOCK_SIZES_ALL: usize = 19;
+  pub const BLOCK_SIZES_ALL: usize = 24;
 
   const BLOCK_SIZE_WIDTH_LOG2: [usize; BlockSize::BLOCK_SIZES_ALL] =
-    [2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 2, 4, 3, 5, 4, 6];
+    [2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 2, 4, 3, 5, 4, 6, 5, 7];
 
   const BLOCK_SIZE_HEIGHT_LOG2: [usize; BlockSize::BLOCK_SIZES_ALL] =
-    [2, 3, 2, 3, 4, 3, 4, 5, 4, 5, 6, 5, 6, 4, 2, 5, 3, 6, 4];
+    [2, 3, 2, 3, 4, 3, 4, 5, 4, 5, 6, 5, 6, 7, 6, 7, 4, 2, 5, 3, 6, 4, 7, 5];
 
   pub fn cfl_allowed(self) -> bool {
     // TODO: fix me when enabling EXT_PARTITION_TYPES
@@ -91,6 +102,7 @@ impl BlockSize {
 
 /// Transform Size
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[repr(C)]
 pub enum TxSize {
   TX_4X4,
   TX_8X8,
@@ -338,21 +350,65 @@ impl PredictionMode {
     let stride = dst.plane.cfg.stride;
     let x = dst.x;
     let y = dst.y;
+    // TODO: pass bd (bitdepth) as a parameter
+    let bd = 8;
+    let base = 128 << (bd - 8);
 
-    if self != PredictionMode::H_PRED && y != 0 {
-      above[1..B::W + 1].copy_from_slice(&dst.go_up(1).as_slice()[..B::W]);
+    if y != 0 {
+      if self != PredictionMode::H_PRED {
+        above[1..B::W + 1].copy_from_slice(&dst.go_up(1).as_slice()[..B::W]);
+      } else if self == PredictionMode::H_PRED &&  x == 0 {
+        for i in 0..B::W {
+          above[i+1] = dst.go_up(1).p(0, 0);
+        }
+      }
     }
 
-    if self != PredictionMode::V_PRED && x != 0 {
-      let left_slice = dst.go_left(1);
-      for i in 0..B::H {
-        left[i + 1] = left_slice.p(0, i);
+    if x != 0 {
+      if self != PredictionMode::V_PRED {
+        let left_slice = dst.go_left(1);
+        for i in 0..B::H {
+          left[i + 1] = left_slice.p(0, i);
+        }
+      } else if self == PredictionMode::V_PRED && y == 0 {
+        for i in 0..B::H {
+          left[i + 1] = dst.go_left(1).p(0, 0);
+          // FIXME(yushin): Figure out why below does not work??
+          //left[i + 1] = dst.go_left(1).plane.data[0];
+        }
       }
     }
 
     if self == PredictionMode::PAETH_PRED && x != 0 && y != 0 {
       above[0] = dst.go_up(1).go_left(1).p(0, 0);
-      left[0] = above[0];
+    }
+
+    if self == PredictionMode::SMOOTH_H_PRED ||
+      self == PredictionMode::SMOOTH_V_PRED ||
+      self == PredictionMode::SMOOTH_PRED ||
+      self == PredictionMode::PAETH_PRED {
+      if x == 0 && y != 0 {
+        for i in 0..B::H {
+          left[i + 1] = dst.go_up(1).p(0, 0);
+        }
+      }
+      if x != 0 && y == 0 {
+        for i in 0..B::W {
+          above[i + 1] = dst.go_left(1).p(0, 0);
+        }
+      }
+    }
+
+    if self == PredictionMode::PAETH_PRED {
+      if x == 0 && y != 0 {
+        above[0] = dst.go_up(1).p(0, 0);
+      }
+      if x != 0 && y == 0 {
+        above[0] = dst.go_left(1).p(0, 0);
+      }
+      if x == 0 && y == 0 {
+        above[0] = base;
+      }      
     }
 
     let slice = dst.as_mut_slice();
@@ -366,16 +422,24 @@ impl PredictionMode {
         (0, _) => B::pred_dc_top(slice, stride, above_slice, left_slice),
         _ => B::pred_dc(slice, stride, above_slice, left_slice)
       },
-      PredictionMode::H_PRED => B::pred_h(slice, stride, left_slice),
-      PredictionMode::V_PRED => B::pred_v(slice, stride, above_slice),
+      PredictionMode::H_PRED => match (x, y) {
+        (0, 0) => B::pred_h(slice, stride, left_slice),
+        (0, _) => B::pred_h(slice, stride, above_slice),
+        (_, _) => B::pred_h(slice, stride, left_slice),
+      },
+      PredictionMode::V_PRED => match (x, y) {
+        (0, 0) => B::pred_v(slice, stride, above_slice),
+        (_, 0) => B::pred_v(slice, stride, left_slice),
+        (_, _) => B::pred_v(slice, stride, above_slice),
+      },
       PredictionMode::PAETH_PRED =>
         B::pred_paeth(slice, stride, above_slice, left_slice, above[0]),
       PredictionMode::SMOOTH_PRED =>
-        B::pred_smooth(slice, stride, above_slice, left_slice, 8),
+        B::pred_smooth(slice, stride, above_slice, left_slice),
       PredictionMode::SMOOTH_H_PRED =>
-        B::pred_smooth_h(slice, stride, above_slice, left_slice, 8),
+        B::pred_smooth_h(slice, stride, above_slice, left_slice),
       PredictionMode::SMOOTH_V_PRED =>
-        B::pred_smooth_v(slice, stride, above_slice, left_slice, 8),
+        B::pred_smooth_v(slice, stride, above_slice, left_slice),
       _ => unimplemented!()
     }
   }
