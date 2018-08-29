@@ -160,7 +160,7 @@ fn compute_rd_cost(
     unimplemented!();
   };
 
-  if !luma_only {
+  /*if !luma_only {
   let PlaneConfig { xdec, ydec, .. } = fs.input.planes[1].cfg;
 
   let mask = !(MI_SIZE - 1);
@@ -185,7 +185,7 @@ fn compute_rd_cost(
       );
     }
   };
-  }
+  }*/
   // Compute rate
   let rate = (bit_cost as f64) / ((1 << OD_BITRES) as f64);
 
