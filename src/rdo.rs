@@ -572,14 +572,14 @@ pub fn rdo_tx_type_decision(
   let is_inter = !mode.is_intra();
 
   let cw_checkpoint = cw.checkpoint();
+  motion_compensate(fi, fs, cw, mode, ref_frame, mv, bsize, bo, bit_depth);
+  let cw_checkpoint_two = cw.checkpoint();
 
   for &tx_type in RAV1E_TX_TYPES {
     // Skip unsupported transform types
     if av1_tx_used[tx_set as usize][tx_type as usize] == 0 {
       continue;
     }
-
-    motion_compensate(fi, fs, cw, mode, ref_frame, mv, bsize, bo, bit_depth);
 
     let mut wr: &mut dyn Writer = &mut WriterCounter::new();
     let tell = wr.tell_frac();
@@ -612,11 +612,11 @@ pub fn rdo_tx_type_decision(
       best_type = tx_type;
     }
 
-    cw.rollback(&cw_checkpoint);
+    cw.rollback(&cw_checkpoint_two);
   }
 
   assert!(best_rd >= 0_f64);
-
+cw.rollback(&cw_checkpoint);
   best_type
 }
 
