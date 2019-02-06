@@ -156,8 +156,8 @@ pub fn parse_cli() -> CliOptions {
 fn parse_config(matches: &ArgMatches) -> EncoderConfig {
   let speed = matches.value_of("SPEED").unwrap().parse().unwrap();
   let quantizer = matches.value_of("QP").unwrap().parse().unwrap();
-  let min_interval = matches.value_of("MIN_KEYFRAME_INTERVAL").unwrap().parse().unwrap();
   let max_interval = matches.value_of("KEYFRAME_INTERVAL").unwrap().parse().unwrap();
+  let min_interval = matches.value_of("MIN_KEYFRAME_INTERVAL").unwrap().parse::<u64>().unwrap().min(max_interval);
 
   // Validate arguments
   if quantizer == 0 {
