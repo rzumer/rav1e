@@ -36,6 +36,13 @@ pub fn parse_cli() -> CliOptions {
     .version("0.1.0")
     .about("AV1 video encoder")
     .arg(
+      Arg::with_name("THREADS")
+        .help("Set the threadpool size")
+        .long("threads")
+        .takes_value(true)
+        .default_value("0")
+    )
+    .arg(
       Arg::with_name("INPUT")
         .help("Uncompressed YUV4MPEG2 video input")
         .required(true)
