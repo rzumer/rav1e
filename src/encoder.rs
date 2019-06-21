@@ -1776,17 +1776,19 @@ fn encode_partition_topdown<T: Pixel, W: Writer>(
     // Blocks of sizes within the supported range are subjected to a partitioning decision
     let mut partition_types: Vec<PartitionType> = Vec::new();
     if must_split {
-      partition_types.push(PartitionType::PARTITION_SPLIT);
       if split_horz { partition_types.push(PartitionType::PARTITION_HORZ); };
       if split_vert { partition_types.push(PartitionType::PARTITION_VERT); };
-    } else if bsize.width_log2() == fi.min_partition_size.width_log2() + 1 {
-      partition_types.push(PartitionType::PARTITION_NONE);
       partition_types.push(PartitionType::PARTITION_SPLIT);
+    } else if bsize.width_log2() == fi.min_partition_size.width_log2() + 1 {
+      // Same order as partition::RAV1E_PARTITION_TYPES
+      partition_types.push(PartitionType::PARTITION_NONE);
       partition_types.push(PartitionType::PARTITION_HORZ);
 
       if fi.sequence.chroma_sampling != ChromaSampling::Cs422 {
         partition_types.push(PartitionType::PARTITION_VERT);
       }
+
+      partition_types.push(PartitionType::PARTITION_SPLIT);
     } else {
       partition_types.push(PartitionType::PARTITION_NONE);
       partition_types.push(PartitionType::PARTITION_SPLIT);
