@@ -390,8 +390,8 @@ impl SpeedSettings {
     speed <= 2
   }
 
-  fn no_scene_detection_preset(speed: usize) -> bool {
-    speed == 10
+  fn no_scene_detection_preset(_speed: usize) -> bool {
+    false
   }
 
   /// Currently Diamond ME gives better quality than full search on most videos,
