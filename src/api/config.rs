@@ -259,6 +259,8 @@ pub struct SpeedSettings {
   pub diamond_me: bool,
   /// Enables CDEF.
   pub cdef: bool,
+  /// Enabled loop restoration.
+  pub loop_restoration: bool,
   /// Enables searching for the optimal segment ID (quantizer delta) with RDO.
   ///
   /// When disabled, the segment ID is chosen heuristically.
@@ -283,6 +285,7 @@ impl Default for SpeedSettings {
       no_scene_detection: false,
       diamond_me: false,
       cdef: false,
+      loop_restoration: false,
       quantizer_rdo: false,
       use_satd_subpel: false,
     }
@@ -319,6 +322,7 @@ impl SpeedSettings {
       no_scene_detection: Self::no_scene_detection_preset(speed),
       diamond_me: Self::diamond_me_preset(speed),
       cdef: Self::cdef_preset(speed),
+      loop_restoration: Self::loop_restoration_preset(speed),
       quantizer_rdo: Self::quantizer_rdo_preset(speed),
       use_satd_subpel: Self::use_satd_subpel(speed),
     }
@@ -400,6 +404,10 @@ impl SpeedSettings {
 
   fn cdef_preset(_speed: usize) -> bool {
     true
+  }
+
+  fn loop_restoration_preset(speed: usize) -> bool {
+    speed <= 8
   }
 
   fn quantizer_rdo_preset(speed: usize) -> bool {
