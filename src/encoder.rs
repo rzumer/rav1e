@@ -220,8 +220,8 @@ impl Sequence {
       enable_warped_motion: false,
       enable_superres: false,
       enable_cdef: config.speed_settings.cdef
-        && config.chroma_sampling != ChromaSampling::Cs422,
-      enable_restoration: config.chroma_sampling != ChromaSampling::Cs422,
+        && config.chroma_sampling == ChromaSampling::Cs420,
+      enable_restoration: config.chroma_sampling == ChromaSampling::Cs420,
       enable_large_lru: true,
       operating_points_cnt_minus_1: 0,
       operating_point_idc,
