@@ -824,6 +824,8 @@ pub fn rdo_mode_decision<T: Pixel>(
     RDOType::PixelDistRealRate
   };
 
+  let mut skipped_modes = Vec::new();
+
   if fi.frame_type == FrameType::INTER {
     for i in inter_cfg.allowed_ref_frames().iter().copied() {
       // Don't search LAST3 since it's used only for probs
@@ -1039,6 +1041,8 @@ pub fn rdo_mode_decision<T: Pixel>(
       };
 
       let intra_mode_set = RAV1E_INTRA_MODES;
+      let mut min_satd = 32768;
+
       let mut satds = {
         // FIXME: If tx partition is used, this whole sads block should be fixed
         debug_assert!(bsize == tx_size.block_size());
@@ -1061,6 +1065,8 @@ pub fn rdo_mode_decision<T: Pixel>(
         intra_mode_set
           .iter()
           .map(|&luma_mode| {
+            if skipped_modes.contains(&luma_mode) { return (luma_mode, 32768); }
+
             let tile_rect = ts.tile_rect();
             let rec = &mut ts.rec.planes[0];
             let mut rec_region =
@@ -1081,7 +1087,7 @@ pub fn rdo_mode_decision<T: Pixel>(
               .subregion(Area::BlockStartingAt { bo: tile_bo.0 });
             let plane_ref = rec_region.as_const();
 
-            (
+            let result = (
               luma_mode,
               get_satd(
                 &plane_org,
@@ -1090,7 +1096,23 @@ pub fn rdo_mode_decision<T: Pixel>(
                 fi.sequence.bit_depth,
                 fi.cpu_feature_level,
               ),
-            )
+            );
+
+            min_satd = min_satd.min(result.1);
+
+            if result.1 > min_satd * 2 {
+              match result.0 {
+                PredictionMode::H_PRED => {
+                  skipped_modes.push(PredictionMode::SMOOTH_H_PRED);
+                }
+                PredictionMode::V_PRED => {
+                  skipped_modes.push(PredictionMode::SMOOTH_V_PRED);
+                }
+                _ => { }
+              };
+            }
+
+            result
           })
           .collect::<Vec<_>>()
       };
