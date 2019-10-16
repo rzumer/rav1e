@@ -1035,7 +1035,7 @@ pub fn rdo_mode_decision<T: Pixel>(
           && fi.config.speed_settings.prediction_modes
             >= PredictionModesSetting::ComplexAll)
       {
-        7
+        6
       } else {
         3
       };
