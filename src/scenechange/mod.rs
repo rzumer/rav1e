@@ -185,8 +185,7 @@ impl SceneChangeDetector {
       (delta_yuv.1 / len as u64) as u16,
       (delta_yuv.2 / len as u64) as u16,
     );
-    // Chroma plane differences are less important than luma plane differences.
-    let delta_avg = ((delta_yuv.0 + (delta_yuv.1 / 2) + (delta_yuv.2 / 2)) / 2) as u8;
+    let delta_avg = ((delta_yuv.0 + (delta_yuv.1) + (delta_yuv.2)) / 3) as u8;
     delta_avg >= self.threshold
   }
 }
