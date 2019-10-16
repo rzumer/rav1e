@@ -37,7 +37,7 @@ impl SceneChangeDetector {
     // very unlikely to have a delta greater than 3 in YUV, whereas they may reach into
     // the double digits in HSV. Therefore, 12 was chosen as a reasonable default threshold.
     // This may be adjusted later.
-    const BASE_THRESHOLD: f64 = 12.0;
+    const BASE_THRESHOLD: f64 = 11.0;
     Self {
       threshold: (BASE_THRESHOLD * bit_depth as f64 / 8.0).round() as u8,
       excluded_frames: BTreeSet::new(),
