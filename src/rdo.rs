@@ -1100,7 +1100,7 @@ pub fn rdo_mode_decision<T: Pixel>(
 
             min_satd = min_satd.min(result.1);
 
-            if result.1 > min_satd * 2 {
+            if result.1 > min_satd * 4 {
               match result.0 {
                 PredictionMode::H_PRED => {
                   skipped_modes.push(PredictionMode::SMOOTH_H_PRED);
