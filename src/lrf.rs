@@ -1243,9 +1243,9 @@ impl RestorationState {
       // Specific content does affect optimal LRU size choice, but the
       // quantizer in use is a surprisingly strong selector.
       let lrf_base_shift = if fi.base_q_idx > 200 {
-        0 // big
+        2 // big
       } else if fi.base_q_idx > 160 {
-        1
+        2
       } else {
         2 // small
       };
