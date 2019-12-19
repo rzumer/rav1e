@@ -273,6 +273,8 @@ pub struct SpeedSettings {
   pub use_satd_subpel: bool,
   /// Use non-square partition type everywhere
   pub non_square_partition: bool,
+  /// Enable segmentation
+  pub enable_segmentation: bool,
 }
 
 impl Default for SpeedSettings {
@@ -295,6 +297,7 @@ impl Default for SpeedSettings {
       quantizer_rdo: false,
       use_satd_subpel: false,
       non_square_partition: false,
+      enable_segmentation: true,
     }
   }
 }
@@ -333,6 +336,7 @@ impl SpeedSettings {
       quantizer_rdo: Self::quantizer_rdo_preset(speed),
       use_satd_subpel: Self::use_satd_subpel(speed),
       non_square_partition: Self::non_square_partition_preset(speed),
+      enable_segmentation: Self::enable_segmentation_preset(speed),
     }
   }
 
@@ -431,6 +435,13 @@ impl SpeedSettings {
   }
 
   const fn non_square_partition_preset(speed: usize) -> bool {
+    speed == 0
+  }
+
+  // FIXME: this is currently only enabled at speed 0 because choosing a segment
+  // requires doing RDO, but once that is replaced by a less bruteforce
+  // solution we should be able to enable segmentation at all speeds.
+  const fn enable_segmentation_preset(speed: usize) -> bool {
     speed == 0
   }
 }
