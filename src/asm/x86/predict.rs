@@ -136,15 +136,15 @@ pub fn dispatch_predict_intra<T: Pixel>(
         | PredictionMode::D67_PRED => {
           let enable_ief = ief_params.is_some() as libc::c_int;
 
-          if enable_ief > 0 {
+          if enable_ief < 0 {
             // FIXME: segfaults with smooth filter, desyncs without
             call_native(dst);
           } else {
-            let ief_smooth_filter = if let Some(params) = ief_params {
+            let ief_smooth_filter = false/*if let Some(params) = ief_params {
               params.use_smooth_filter()
             } else {
               false
-            } as libc::c_int;
+            }*/ as libc::c_int;
             let angle = angle | (enable_ief << 10) | (ief_smooth_filter << 9);
 
             (if angle <= 90 {
