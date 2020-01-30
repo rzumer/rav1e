@@ -61,6 +61,9 @@ pub struct EncoderConfig {
   /// Still picture mode flag.
   pub still_picture: bool,
 
+  /// Lossless mode flag.
+  pub lossless: bool,
+
   /// Flag to force all frames to be error resilient.
   pub error_resilient: bool,
 
@@ -152,6 +155,8 @@ impl EncoderConfig {
       enable_timing_info: false,
 
       still_picture: false,
+
+      lossless: false,
 
       error_resilient: false,
       switch_frame_interval: 0,

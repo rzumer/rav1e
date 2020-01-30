@@ -535,6 +535,7 @@ unsafe fn option_match(
       enc.enable_timing_info = value.parse().map_err(|_| ())?
     }
     "still_picture" => enc.still_picture = value.parse().map_err(|_| ())?,
+    "lossless" => enc.lossless = value.parse().map_err(|_| ())?,
 
     _ => return Err(()),
   }

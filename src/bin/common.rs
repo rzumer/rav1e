@@ -310,6 +310,12 @@ pub fn parse_cli() -> Result<CliOptions, CliError> {
         .long("still-picture")
         .alias("still_picture")
     )
+    // LOSSLESS
+    .arg(
+      Arg::with_name("LOSSLESS")
+      .help("Lossless mode")
+      .long("lossless")
+    )
     // DEBUGGING
     .arg(
       Arg::with_name("BENCHMARK")
@@ -601,6 +607,7 @@ fn parse_config(matches: &ArgMatches<'_>) -> Result<EncoderConfig, CliError> {
   };
 
   cfg.still_picture = matches.is_present("STILL_PICTURE");
+  cfg.lossless = matches.is_present("LOSSLESS");
 
   cfg.quantizer = quantizer;
   cfg.min_quantizer =
