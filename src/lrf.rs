@@ -1397,10 +1397,16 @@ impl RestorationState {
       / uv_unit_size)
       .max(1);
 
+    let restoration_type = if fi.sequence.enable_restoration {
+      RESTORE_SWITCHABLE
+    } else {
+      RESTORE_NONE
+    };
+
     RestorationState {
       planes: [
         RestorationPlane::new(
-          RESTORE_SWITCHABLE,
+          restoration_type,
           y_unit_size,
           y_unit_log2 - y_sb_log2,
           y_unit_log2 - y_sb_log2,
@@ -1411,7 +1417,7 @@ impl RestorationState {
           y_rows,
         ),
         RestorationPlane::new(
-          RESTORE_SWITCHABLE,
+          restoration_type,
           uv_unit_size,
           uv_unit_log2 - uv_sb_h_log2,
           uv_unit_log2 - uv_sb_v_log2,
@@ -1422,7 +1428,7 @@ impl RestorationState {
           uv_rows,
         ),
         RestorationPlane::new(
-          RESTORE_SWITCHABLE,
+          restoration_type,
           uv_unit_size,
           uv_unit_log2 - uv_sb_h_log2,
           uv_unit_log2 - uv_sb_v_log2,

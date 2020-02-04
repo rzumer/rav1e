@@ -76,15 +76,18 @@ pub struct ReferenceFrame<T: Pixel> {
   pub segmentation: SegmentationState,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ReferenceFramesSet<T: Pixel> {
   pub frames: [Option<Arc<ReferenceFrame<T>>>; (REF_FRAMES as usize)],
   pub deblock: [DeblockState; (REF_FRAMES as usize)],
 }
 
 impl<T: Pixel> ReferenceFramesSet<T> {
-  pub fn new() -> Self {
-    Self { frames: Default::default(), deblock: Default::default() }
+  pub fn new(lossless: bool) -> Self {
+    Self {
+      frames: Default::default(),
+      deblock: [DeblockState::new(lossless); REF_FRAMES as usize],
+    }
   }
 }
 
@@ -197,8 +200,9 @@ impl Sequence {
     }
 
     // Restoration filters are not useful for very small frame sizes,
-    // so disable them in that case.
-    let enable_restoration_filters = config.width >= 32 && config.height >= 32;
+    // so disable them in that case, as well as for lossless mode.
+    let enable_restoration_filters =
+      !config.lossless && config.width >= 32 && config.height >= 32;
 
     Sequence {
       profile,
@@ -386,7 +390,7 @@ impl<T: Pixel> FrameState<T> {
       cdfs: CDFContext::new(0),
       context_update_tile_id: 0,
       max_tile_size_bytes: 0,
-      deblock: Default::default(),
+      deblock: DeblockState::new(fi.config.lossless),
       segmentation: Default::default(),
       restoration: rs,
       half_res_pmvs: Vec::with_capacity(fi.tiling.cols * fi.tiling.rows),
@@ -423,14 +427,14 @@ pub struct DeblockState {
   pub block_delta_multi: bool,
 }
 
-impl Default for DeblockState {
-  fn default() -> Self {
+impl DeblockState {
+  fn new(lossless: bool) -> Self {
     DeblockState {
-      levels: [8, 8, 4, 4],
+      levels: if lossless { [0; 4] } else { [8, 8, 4, 4] },
       sharpness: 0,
       deltas_enabled: false, // requires delta_q_enabled
       delta_updates_enabled: false,
-      ref_deltas: [1, 0, 0, 0, 0, -1, -1, -1],
+      ref_deltas: [1, 0, 0, 0, -(lossless as i8), -(!lossless as i8), -1, -1],
       mode_deltas: [0, 0],
       block_deltas_enabled: false,
       block_delta_shift: 0,
@@ -697,7 +701,7 @@ impl<T: Pixel> FrameInvariants<T> {
       delta_q_present: false,
       ref_frames: [0; INTER_REFS_PER_FRAME],
       ref_frame_sign_bias: [false; INTER_REFS_PER_FRAME],
-      rec_buffer: ReferenceFramesSet::new(),
+      rec_buffer: ReferenceFramesSet::new(config.lossless),
       base_q_idx: config.quantizer as u8,
       dc_delta_q: [0; 3],
       ac_delta_q: [0; 3],
@@ -721,7 +725,7 @@ impl<T: Pixel> FrameInvariants<T> {
         }
         Arc::new(vec)
       },
-      lookahead_rec_buffer: ReferenceFramesSet::new(),
+      lookahead_rec_buffer: ReferenceFramesSet::new(config.lossless),
       w_in_imp_b,
       h_in_imp_b,
       // dynamic allocation: once per frame
@@ -903,7 +907,8 @@ impl<T: Pixel> FrameInvariants<T> {
   pub fn set_quantizers(&mut self, qps: &QuantizerParameters) {
     self.base_q_idx = qps.ac_qi[0];
     let base_q_idx = self.base_q_idx as i32;
-    self.cdef_damping = 3 + (self.base_q_idx >> 6);
+    self.cdef_damping =
+      3 + if self.sequence.enable_cdef { self.base_q_idx >> 6 } else { 0 };
     for pi in 0..3 {
       debug_assert!(qps.dc_qi[pi] as i32 - base_q_idx >= -128);
       debug_assert!((qps.dc_qi[pi] as i32 - base_q_idx) < 128);
@@ -917,66 +922,82 @@ impl<T: Pixel> FrameInvariants<T> {
     self.me_lambda = self.lambda.sqrt();
     self.dist_scale = qps.dist_scale;
 
-    let q = bexp64(qps.log_target_q as i64 + q57(QSCALE)) as f32;
-    /* These coefficients were trained on libaom. */
-    if !self.intra_only {
-      let predicted_y_f1 = clamp(
-        (-q * q * 0.0000023593946_f32 + q * 0.0068615186_f32 + 0.02709886_f32)
-          .round() as i32,
-        0,
-        15,
-      );
-      let predicted_y_f2 = clamp(
-        (-q * q * 0.00000057629734_f32 + q * 0.0013993345_f32 + 0.03831067_f32)
-          .round() as i32,
-        0,
-        3,
-      );
-      let predicted_uv_f1 = clamp(
-        (-q * q * 0.0000007095069_f32 + q * 0.0034628846_f32 + 0.00887099_f32)
-          .round() as i32,
-        0,
-        15,
-      );
-      let predicted_uv_f2 = clamp(
-        (q * q * 0.00000023874085_f32 + q * 0.00028223585_f32 + 0.05576307_f32)
-          .round() as i32,
-        0,
-        3,
-      );
-      self.cdef_y_strengths[0] =
-        (predicted_y_f1 * CDEF_SEC_STRENGTHS as i32 + predicted_y_f2) as u8;
-      self.cdef_uv_strengths[0] =
-        (predicted_uv_f1 * CDEF_SEC_STRENGTHS as i32 + predicted_uv_f2) as u8;
-    } else {
-      let predicted_y_f1 = clamp(
-        (q * q * 0.0000033731974_f32 + q * 0.008070594_f32 + 0.0187634_f32)
-          .round() as i32,
-        0,
-        15,
-      );
-      let predicted_y_f2 = clamp(
-        (-q * q * -0.0000029167343_f32 + q * 0.0027798624_f32 + 0.0079405_f32)
-          .round() as i32,
-        0,
-        3,
-      );
-      let predicted_uv_f1 = clamp(
-        (-q * q * 0.0000130790995_f32 + q * 0.012892405_f32 - 0.00748388_f32)
-          .round() as i32,
-        0,
-        15,
-      );
-      let predicted_uv_f2 = clamp(
-        (q * q * 0.0000032651783_f32 + q * 0.00035520183_f32 + 0.00228092_f32)
-          .round() as i32,
-        0,
-        3,
-      );
-      self.cdef_y_strengths[0] =
-        (predicted_y_f1 * CDEF_SEC_STRENGTHS as i32 + predicted_y_f2) as u8;
-      self.cdef_uv_strengths[0] =
-        (predicted_uv_f1 * CDEF_SEC_STRENGTHS as i32 + predicted_uv_f2) as u8;
+    if self.sequence.enable_cdef {
+      let q = bexp64(qps.log_target_q as i64 + q57(QSCALE)) as f32;
+      /* These coefficients were trained on libaom. */
+      if !self.intra_only {
+        let predicted_y_f1 = clamp(
+          (-q * q * 0.0000023593946_f32
+            + q * 0.0068615186_f32
+            + 0.02709886_f32)
+            .round() as i32,
+          0,
+          15,
+        );
+        let predicted_y_f2 = clamp(
+          (-q * q * 0.00000057629734_f32
+            + q * 0.0013993345_f32
+            + 0.03831067_f32)
+            .round() as i32,
+          0,
+          3,
+        );
+        let predicted_uv_f1 = clamp(
+          (-q * q * 0.0000007095069_f32
+            + q * 0.0034628846_f32
+            + 0.00887099_f32)
+            .round() as i32,
+          0,
+          15,
+        );
+        let predicted_uv_f2 = clamp(
+          (q * q * 0.00000023874085_f32
+            + q * 0.00028223585_f32
+            + 0.05576307_f32)
+            .round() as i32,
+          0,
+          3,
+        );
+        self.cdef_y_strengths[0] =
+          (predicted_y_f1 * CDEF_SEC_STRENGTHS as i32 + predicted_y_f2) as u8;
+        self.cdef_uv_strengths[0] = (predicted_uv_f1
+          * CDEF_SEC_STRENGTHS as i32
+          + predicted_uv_f2) as u8;
+      } else {
+        let predicted_y_f1 = clamp(
+          (q * q * 0.0000033731974_f32 + q * 0.008070594_f32 + 0.0187634_f32)
+            .round() as i32,
+          0,
+          15,
+        );
+        let predicted_y_f2 = clamp(
+          (-q * q * -0.0000029167343_f32
+            + q * 0.0027798624_f32
+            + 0.0079405_f32)
+            .round() as i32,
+          0,
+          3,
+        );
+        let predicted_uv_f1 = clamp(
+          (-q * q * 0.0000130790995_f32 + q * 0.012892405_f32 - 0.00748388_f32)
+            .round() as i32,
+          0,
+          15,
+        );
+        let predicted_uv_f2 = clamp(
+          (q * q * 0.0000032651783_f32
+            + q * 0.00035520183_f32
+            + 0.00228092_f32)
+            .round() as i32,
+          0,
+          3,
+        );
+        self.cdef_y_strengths[0] =
+          (predicted_y_f1 * CDEF_SEC_STRENGTHS as i32 + predicted_y_f2) as u8;
+        self.cdef_uv_strengths[0] = (predicted_uv_f1
+          * CDEF_SEC_STRENGTHS as i32
+          + predicted_uv_f2) as u8;
+      }
     }
   }
 
@@ -1753,7 +1774,7 @@ pub fn encode_block_post_cdef<T: Pixel>(
   }
 
   // write tx_size here
-  if fi.tx_mode_select {
+  if fi.tx_mode_select && !fi.config.lossless {
     if bsize > BlockSize::BLOCK_4X4 && (!is_inter || !skip) {
       if !is_inter {
         cw.write_tx_size_intra(w, tile_bo, bsize, tx_size);
@@ -1765,6 +1786,7 @@ pub fn encode_block_post_cdef<T: Pixel>(
         debug_assert!(bsize > BlockSize::BLOCK_4X4);
         debug_assert!(is_inter);
         debug_assert!(!skip);
+        debug_assert!(!fi.config.lossless);
         let max_tx_size = max_txsize_rect_lookup[bsize as usize];
         debug_assert!(max_tx_size.block_size() <= BlockSize::BLOCK_64X64);
 
@@ -2954,29 +2976,28 @@ fn encode_tile_group<T: Pixel>(
     fs.enc_stats += &tile_stats;
   }
 
-  /* TODO: Don't apply if lossless */
-  deblock_filter_optimize(fi, fs, &blocks);
-  if fs.deblock.levels[0] != 0 || fs.deblock.levels[1] != 0 {
-    deblock_filter_frame(fi, fs, &blocks);
-  }
-
-  if fi.sequence.enable_restoration {
-    // Until the loop filters are pipelined, we'll need to keep
-    // around a copy of both the pre- and post-cdef frame.
-    let pre_cdef_frame = fs.rec.clone();
-
-    /* TODO: Don't apply if lossless */
-    let rec = Arc::make_mut(&mut fs.rec);
-    if fi.sequence.enable_cdef {
-      cdef_filter_frame(fi, rec, &blocks);
+  if !fi.config.lossless {
+    deblock_filter_optimize(fi, fs, &blocks);
+    if fs.deblock.levels[0] != 0 || fs.deblock.levels[1] != 0 {
+      deblock_filter_frame(fi, fs, &blocks);
     }
-    /* TODO: Don't apply if lossless */
-    fs.restoration.lrf_filter_frame(rec, &pre_cdef_frame, fi);
-  } else {
-    /* TODO: Don't apply if lossless */
-    let rec = Arc::make_mut(&mut fs.rec);
-    if fi.sequence.enable_cdef {
-      cdef_filter_frame(fi, rec, &blocks);
+
+    if fi.sequence.enable_restoration {
+      // Until the loop filters are pipelined, we'll need to keep
+      // around a copy of both the pre- and post-cdef frame.
+      let pre_cdef_frame = fs.rec.clone();
+
+      let rec = Arc::make_mut(&mut fs.rec);
+      if fi.sequence.enable_cdef {
+        cdef_filter_frame(fi, rec, &blocks);
+      }
+
+      fs.restoration.lrf_filter_frame(rec, &pre_cdef_frame, fi);
+    } else {
+      let rec = Arc::make_mut(&mut fs.rec);
+      if fi.sequence.enable_cdef {
+        cdef_filter_frame(fi, rec, &blocks);
+      }
     }
   }
 

@@ -738,13 +738,15 @@ impl<W: io::Write> UncompressedHeader for BitWriter<W, BigEndian> {
     // loop_filter_params in the spec
     self.write_deblock_filter_b(fi, &fs.deblock)?;
 
-    // cdef
+    // cdef_params
     self.write_frame_cdef(fi)?;
 
     // loop restoration
     self.write_frame_lrf(fi, &fs.restoration)?;
 
-    self.write_bit(fi.tx_mode_select)?; // tx mode
+    if !fi.config.lossless {
+      self.write_bit(fi.tx_mode_select)?; // tx mode
+    }
 
     let mut reference_select = false;
     if !fi.intra_only {
@@ -869,6 +871,23 @@ impl<W: io::Write> UncompressedHeader for BitWriter<W, BigEndian> {
   fn write_deblock_filter_b<T: Pixel>(
     &mut self, fi: &FrameInvariants<T>, deblock: &DeblockState,
   ) -> io::Result<()> {
+    if fi.config.lossless || fi.allow_intrabc {
+      assert_eq!(0, deblock.levels[0]);
+      assert_eq!(0, deblock.levels[1]);
+      assert_eq!(1, deblock.ref_deltas[RefType::INTRA_FRAME as usize]);
+      assert_eq!(0, deblock.ref_deltas[RefType::LAST_FRAME as usize]);
+      assert_eq!(0, deblock.ref_deltas[RefType::LAST2_FRAME as usize]);
+      assert_eq!(0, deblock.ref_deltas[RefType::LAST3_FRAME as usize]);
+      assert_eq!(0, deblock.ref_deltas[RefType::BWDREF_FRAME as usize]);
+      assert_eq!(-1, deblock.ref_deltas[RefType::GOLDEN_FRAME as usize]);
+      assert_eq!(-1, deblock.ref_deltas[RefType::ALTREF_FRAME as usize]);
+      assert_eq!(-1, deblock.ref_deltas[RefType::ALTREF2_FRAME as usize]);
+      assert_eq!(0, deblock.mode_deltas[0]);
+      assert_eq!(0, deblock.mode_deltas[1]);
+
+      return Ok(());
+    }
+
     assert!(deblock.levels[0] < 64);
     self.write(6, deblock.levels[0])?; // loop deblocking filter level 0
     assert!(deblock.levels[1] < 64);
@@ -922,18 +941,24 @@ impl<W: io::Write> UncompressedHeader for BitWriter<W, BigEndian> {
   fn write_frame_cdef<T: Pixel>(
     &mut self, fi: &FrameInvariants<T>,
   ) -> io::Result<()> {
-    if fi.sequence.enable_cdef {
-      assert!(fi.cdef_damping >= 3);
-      assert!(fi.cdef_damping <= 6);
-      self.write(2, fi.cdef_damping - 3)?;
-      assert!(fi.cdef_bits < 4);
-      self.write(2, fi.cdef_bits)?; // cdef bits
-      for i in 0..(1 << fi.cdef_bits) {
-        assert!(fi.cdef_y_strengths[i] < 64);
-        assert!(fi.cdef_uv_strengths[i] < 64);
-        self.write(6, fi.cdef_y_strengths[i])?; // cdef y strength
-        self.write(6, fi.cdef_uv_strengths[i])?; // cdef uv strength
-      }
+    if fi.config.lossless || fi.allow_intrabc || !fi.sequence.enable_cdef {
+      assert_eq!(0, fi.cdef_bits);
+      assert_eq!(0, fi.cdef_y_strengths[0]);
+      assert_eq!(0, fi.cdef_uv_strengths[0]);
+      assert_eq!(3, fi.cdef_damping);
+      return Ok(());
+    }
+
+    assert!(fi.cdef_damping >= 3);
+    assert!(fi.cdef_damping <= 6);
+    self.write(2, fi.cdef_damping - 3)?;
+    assert!(fi.cdef_bits < 4);
+    self.write(2, fi.cdef_bits)?; // cdef bits
+    for i in 0..(1 << fi.cdef_bits) {
+      assert!(fi.cdef_y_strengths[i] < 64);
+      assert!(fi.cdef_uv_strengths[i] < 64);
+      self.write(6, fi.cdef_y_strengths[i])?; // cdef y strength
+      self.write(6, fi.cdef_uv_strengths[i])?; // cdef uv strength
     }
     Ok(())
   }
@@ -941,43 +966,48 @@ impl<W: io::Write> UncompressedHeader for BitWriter<W, BigEndian> {
   fn write_frame_lrf<T: Pixel>(
     &mut self, fi: &FrameInvariants<T>, rs: &RestorationState,
   ) -> io::Result<()> {
-    if fi.sequence.enable_restoration && !fi.allow_intrabc {
-      // && !self.lossless
-      let mut use_lrf = false;
-      let mut use_chroma_lrf = false;
+    if fi.config.lossless
+      || fi.allow_intrabc
+      || !fi.sequence.enable_restoration
+    {
       for i in 0..PLANES {
-        self.write(2, rs.planes[i].cfg.lrf_type)?; // filter type by plane
-        if rs.planes[i].cfg.lrf_type != RESTORE_NONE {
-          use_lrf = true;
-          if i > 0 {
-            use_chroma_lrf = true;
-          }
+        assert_eq!(RESTORE_NONE, rs.planes[i].cfg.lrf_type);
+      }
+
+      return Ok(());
+    }
+
+    let mut use_lrf = false;
+    let mut use_chroma_lrf = false;
+    for i in 0..PLANES {
+      self.write(2, rs.planes[i].cfg.lrf_type)?; // filter type by plane
+      if rs.planes[i].cfg.lrf_type != RESTORE_NONE {
+        use_lrf = true;
+        if i > 0 {
+          use_chroma_lrf = true;
         }
       }
-      if use_lrf {
-        // The Y shift value written here indicates shift up from superblock size
-        if !fi.sequence.use_128x128_superblock {
-          self
-            .write(1, if rs.planes[0].cfg.unit_size > 64 { 1 } else { 0 })?;
-        }
+    }
+    if use_lrf {
+      // The Y shift value written here indicates shift up from superblock size
+      if !fi.sequence.use_128x128_superblock {
+        self.write(1, if rs.planes[0].cfg.unit_size > 64 { 1 } else { 0 })?;
+      }
 
-        if rs.planes[0].cfg.unit_size > 64 {
-          self
-            .write(1, if rs.planes[0].cfg.unit_size > 128 { 1 } else { 0 })?;
-        }
+      if rs.planes[0].cfg.unit_size > 64 {
+        self.write(1, if rs.planes[0].cfg.unit_size > 128 { 1 } else { 0 })?;
+      }
 
-        if use_chroma_lrf
-          && fi.sequence.chroma_sampling == ChromaSampling::Cs420
-        {
-          self.write(
-            1,
-            if rs.planes[0].cfg.unit_size > rs.planes[1].cfg.unit_size {
-              1
-            } else {
-              0
-            },
-          )?;
-        }
+      if use_chroma_lrf && fi.sequence.chroma_sampling == ChromaSampling::Cs420
+      {
+        self.write(
+          1,
+          if rs.planes[0].cfg.unit_size > rs.planes[1].cfg.unit_size {
+            1
+          } else {
+            0
+          },
+        )?;
       }
     }
     Ok(())
