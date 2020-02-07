@@ -208,17 +208,7 @@ impl PredictionMode {
 
   #[inline(always)]
   pub fn angle_delta_count(self) -> i8 {
-    match self {
-      PredictionMode::V_PRED
-      | PredictionMode::H_PRED
-      | PredictionMode::D45_PRED
-      | PredictionMode::D135_PRED
-      | PredictionMode::D113_PRED
-      | PredictionMode::D157_PRED
-      | PredictionMode::D203_PRED
-      | PredictionMode::D67_PRED => 7,
-      _ => 1,
-    }
+    1
   }
 
   pub fn predict_inter<T: Pixel>(
