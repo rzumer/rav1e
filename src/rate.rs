@@ -8,7 +8,8 @@
 // PATENTS file, you can obtain it at www.aomedia.org/license/patent.
 
 use crate::api::color::ChromaSampling;
-use crate::api::ContextInner;
+use crate::api::lookahead::*;
+use crate::api::{ContextInner, FrameData};
 use crate::encoder::TEMPORAL_DELIMITER;
 use crate::quantize::{ac_q, dc_q, select_ac_qi, select_dc_qi};
 use crate::util::{clamp, ILog, Pixel};
@@ -656,6 +657,8 @@ pub struct RCState {
   scale_window_nframes: [i32; FRAME_NSUBTYPES + 1],
   // The sum of the scale values for each frame subtype in the current window.
   scale_window_sum: [i64; FRAME_NSUBTYPES],
+  // The sum of frame complexity for each frame subtype in the current window.
+  frame_window_complexity: [u32; FRAME_NSUBTYPES],
 }
 
 // TODO: Separate qi values for each color plane.
@@ -877,6 +880,7 @@ impl RCState {
       scale_window_nframes: [0; FRAME_NSUBTYPES + 1],
       scale_window_sum: [0; FRAME_NSUBTYPES],
       des: RCDeserialize::default(),
+      frame_window_complexity: [0; FRAME_NSUBTYPES],
     }
   }
 
@@ -898,7 +902,7 @@ impl RCState {
   // TODO: Separate quantizers for Cb and Cr.
   pub(crate) fn select_qi<T: Pixel>(
     &self, ctx: &ContextInner<T>, output_frameno: u64, fti: usize,
-    maybe_prev_log_base_q: Option<i64>,
+    maybe_prev_log_base_q: Option<i64>, fd: Option<&FrameData<T>>,
   ) -> QuantizerParameters {
     // Is rate control active?
     if self.target_bitrate <= 0 {
@@ -1065,6 +1069,69 @@ impl RCState {
         }
         // Single pass.
         _ => {
+          // Compute a complexity metric from the current frame.
+          let mut frame_complexity = 0;
+
+          if let Some(fd) = fd {
+            if self.twopass_state == PASS_SINGLE {
+              frame_complexity = if fti == FRAME_SUBTYPE_I {
+                estimate_intra_costs(
+                  &fd.fs.input,
+                  fd.fi.sequence.bit_depth,
+                  fd.fi.cpu_feature_level,
+                )
+                .iter()
+                .sum::<u32>()
+              } else {
+                estimate_inter_costs(
+                  fd.fs.input.clone(),
+                  fd.fs.rec.clone(),
+                  fd.fi.sequence.bit_depth,
+                  fd.fi.config,
+                  fd.fi.sequence,
+                )
+                .iter()
+                .sum::<u32>()
+              };
+            }
+
+            // Bias the scale factor based on the complexity of
+            // the current frame relative to that of previous
+            // frames of the same type.
+            let (nframes, complexity) = match fti {
+              FRAME_SUBTYPE_I => {
+                (self.nframes[fti], self.frame_window_complexity[fti])
+              }
+              FRAME_SUBTYPE_SEF => (0, 0),
+              _ => (
+                self.nframes[FRAME_SUBTYPE_P]
+                  + self.nframes[FRAME_SUBTYPE_B0]
+                  + self.nframes[FRAME_SUBTYPE_B1],
+                self.frame_window_complexity[FRAME_SUBTYPE_P]
+                  + self.frame_window_complexity[FRAME_SUBTYPE_B0]
+                  + self.frame_window_complexity[FRAME_SUBTYPE_B1],
+              ),
+            };
+
+            // Add more weight to the biased scale factor as the
+            // number of frames in the current window increases,
+            // thus making the complexity estimate more accurate.
+            if nframes > 0 {
+              let biased_scale = (log_cur_scale as f64
+                / ((frame_complexity as f64
+                  / (complexity as f64 / nframes as f64))
+                  + 0.1)) as i64;
+
+              let max_bias_frames = 3;
+              let biased_scale_weight = (nframes as i64).min(max_bias_frames);
+              let unbiased_scale_weight = 1;
+
+              log_cur_scale = (log_cur_scale * unbiased_scale_weight
+                + biased_scale * biased_scale_weight)
+                / (biased_scale_weight + unbiased_scale_weight);
+            }
+          }
+
           // Figure out how to re-distribute bits so that we hit our fullness
           //  target before the last keyframe in our current buffer window
           //  (after the current frame), or the end of the buffer window,
@@ -1217,14 +1284,15 @@ impl RCState {
     }
   }
 
-  pub fn update_state(
-    &mut self, bits: i64, fti: usize, show_frame: bool, log_target_q: i64,
+  pub fn update_state<T: Pixel>(
+    &mut self, fd: &FrameData<T>, bits: i64, fti: usize, log_target_q: i64,
     trial: bool, droppable: bool,
   ) -> bool {
     if trial {
       assert!(self.needs_trial_encode(fti));
       assert!(bits > 0);
     }
+    let show_frame = fd.fi.show_frame;
     let mut dropped = false;
     // Update rate control only if rate control is active.
     if self.target_bitrate > 0 {
@@ -1312,6 +1380,30 @@ impl RCState {
       }
       // Common to all passes:
       if fti != FRAME_SUBTYPE_SEF && bits > 0 {
+        if self.twopass_state == PASS_SINGLE {
+          let frame_complexity = if fti == FRAME_SUBTYPE_I {
+            estimate_intra_costs(
+              &fd.fs.input,
+              fd.fi.sequence.bit_depth,
+              fd.fi.cpu_feature_level,
+            )
+            .iter()
+            .sum::<u32>()
+          } else {
+            estimate_inter_costs(
+              fd.fs.input.clone(),
+              fd.fs.rec.clone(),
+              fd.fi.sequence.bit_depth,
+              fd.fi.config,
+              fd.fi.sequence,
+            )
+            .iter()
+            .sum::<u32>()
+          };
+
+          self.frame_window_complexity[fti] += frame_complexity;
+        }
+
         // If this is the first example of the given frame type we've seen,
         //  we immediately replace the default scale factor guess with the
         //  estimate we just computed using the first frame.
@@ -1413,7 +1505,7 @@ impl RCState {
     if !self.pass1_data_retrieved {
       if self.twopass_state == PASS_SINGLE {
         pass1_log_base_q = self
-          .select_qi(ctx, output_frameno, FRAME_SUBTYPE_I, None)
+          .select_qi(ctx, output_frameno, FRAME_SUBTYPE_I, None, None)
           .log_base_q;
       }
     } else {

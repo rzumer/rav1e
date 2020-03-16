@@ -204,13 +204,13 @@ impl InterConfig {
 // Thin wrapper for frame-related data
 // that gets cached and reused throughout the life of a frame.
 #[derive(Clone)]
-pub(crate) struct FrameData<T: Pixel> {
-  pub(crate) fi: FrameInvariants<T>,
-  pub(crate) fs: FrameState<T>,
+pub struct FrameData<T: Pixel> {
+  pub fi: FrameInvariants<T>,
+  pub fs: FrameState<T>,
 }
 
 impl<T: Pixel> FrameData<T> {
-  pub(crate) fn new(fi: FrameInvariants<T>, frame: Arc<Frame<T>>) -> Self {
+  pub fn new(fi: FrameInvariants<T>, frame: Arc<Frame<T>>) -> Self {
     let fs = FrameState::new_with_frame(&fi, frame);
     FrameData { fi, fs }
   }
@@ -572,6 +572,7 @@ impl<T: Pixel> ContextInner<T> {
         output_frameno,
         fti,
         self.maybe_prev_log_base_q,
+        Some(self.frame_data.get(&output_frameno).unwrap()),
       )
     };
     let frame_data = self.frame_data.get_mut(&output_frameno).unwrap();
@@ -1076,9 +1077,9 @@ impl<T: Pixel> ContextInner<T> {
       let bits = (sef_data.len() * 8) as i64;
       self.packet_data.extend(sef_data);
       self.rc_state.update_state(
+        frame_data,
         bits,
         FRAME_SUBTYPE_SEF,
-        frame_data.fi.show_frame,
         0,
         false,
         false,
@@ -1118,6 +1119,7 @@ impl<T: Pixel> ContextInner<T> {
         cur_output_frameno,
         fti,
         self.maybe_prev_log_base_q,
+        Some(&frame_data),
       );
       frame_data.fi.set_quantizers(&qps);
 
@@ -1126,9 +1128,9 @@ impl<T: Pixel> ContextInner<T> {
         let data =
           encode_frame(&frame_data.fi, &mut trial_fs, &self.inter_cfg);
         self.rc_state.update_state(
+          &frame_data,
           (data.len() * 8) as i64,
           fti,
-          frame_data.fi.show_frame,
           qps.log_target_q,
           true,
           false,
@@ -1138,6 +1140,7 @@ impl<T: Pixel> ContextInner<T> {
           cur_output_frameno,
           fti,
           self.maybe_prev_log_base_q,
+          Some(&frame_data),
         );
         frame_data.fi.set_quantizers(&qps);
       }
@@ -1152,9 +1155,9 @@ impl<T: Pixel> ContextInner<T> {
       self.maybe_prev_log_base_q = Some(qps.log_base_q);
       // TODO: Add support for dropping frames.
       self.rc_state.update_state(
+        &frame_data,
         (data.len() * 8) as i64,
         fti,
-        frame_data.fi.show_frame,
         qps.log_target_q,
         false,
         false,
