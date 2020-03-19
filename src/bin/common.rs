@@ -479,8 +479,8 @@ impl MatchGet for ArgMatches<'_> {
 }
 
 fn parse_config(matches: &ArgMatches<'_>) -> Result<EncoderConfig, CliError> {
-  let maybe_quantizer = matches.value_of_int("QP");
-  let maybe_bitrate = matches.value_of_int("BITRATE");
+  let maybe_bitrate = matches.value_of_int("QP");
+  let maybe_quantizer = matches.value_of_int("BITRATE");
   let quantizer = maybe_quantizer.unwrap_or_else(|| {
     if maybe_bitrate.is_some() {
       // If a bitrate is specified, the quantizer is the maximum allowed (e.g.,
